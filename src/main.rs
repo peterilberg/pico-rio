@@ -43,6 +43,8 @@ use leasehund::{
     DHCPServerBuffers, DHCPServerSocket, DhcpConfig as LeaseConfig, DhcpConfigBuilder, DhcpServer,
     TransactionEvent,
 };
+use postcard::{from_bytes, to_slice};
+use serde::{Deserialize, Serialize};
 use static_cell::StaticCell;
 use {defmt_rtt as _, panic_probe as _};
 
@@ -384,7 +386,15 @@ async fn core0_task(
                 embassy_net::IpAddress::Ipv4(Ipv4Address::new(192, 168, 64, 47)),
                 12345,
             );
-            match udp.send_to(&buf[..n], remote_endpoint).await {
+
+            let mut status = [0_u8; 512];
+            let msg = Header {
+                sender: 123,
+                time: 0,
+                kind: Kind::Status,
+            };
+            let result = to_slice(&msg, &mut status).unwrap();
+            match udp.send_to(&result, remote_endpoint).await {
                 Ok(()) => {
                     log::info!("sent to {}", remote_endpoint);
                 }
@@ -421,11 +431,31 @@ async fn core1_task(
                 led.toggle();
             }
             Either::Second(buf) => {
+                let header = Header {
+                    sender: 123,
+                    time: 0,
+                    kind: Kind::Echo,
+                };
                 log::info!("echo0");
                 let out = sender.send().await;
                 log::info!("echo1");
-                out.copy_from_slice(buf);
+
+                let mut header_buf = [0; 64];
+                let x = to_slice(&header, &mut header_buf).unwrap();
+                let (head, rest) = out.split_at_mut(x.len());
+                head.copy_from_slice(&x);
+                rest.copy_from_slice(&buf[..rest.len()]);
                 log::info!("echo2");
+
+                let y = from_bytes::<Header>(out);
+                match y {
+                    Ok(h) => {
+                        log::info!("header {:?}", h);
+                    }
+                    Err(x) => {
+                        log::info!("header err {}", x);
+                    }
+                }
                 sender.send_done();
                 log::info!("echo3");
                 receiver.receive_done();
@@ -433,4 +463,17 @@ async fn core1_task(
             }
         }
     }
+}
+
+#[derive(Serialize, Deserialize, Debug, Eq, PartialEq)]
+enum Kind {
+    Status,
+    Echo,
+}
+
+#[derive(Serialize, Deserialize, Debug, Eq, PartialEq)]
+struct Header {
+    sender: u32,
+    time: u32,
+    kind: Kind,
 }
