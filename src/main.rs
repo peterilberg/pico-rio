@@ -8,9 +8,11 @@
 #![no_main]
 
 use assign_resources::assign_resources;
+use core::cmp::{max, min};
 use defmt::*;
 use embassy_executor::Executor;
 use embassy_executor::Spawner;
+use embassy_futures::select::{Either, select};
 use embassy_net::tcp::TcpSocket;
 use embassy_net::udp::{PacketMetadata, UdpSocket};
 use embassy_net::{
@@ -25,9 +27,9 @@ use embassy_rp::peripherals::USB;
 use embassy_rp::usb::{Driver, InterruptHandler};
 use embassy_rp::{bind_interrupts, peripherals};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-use embassy_sync::channel::Channel;
+// use embassy_sync::channel::Channel;
 use embassy_sync::mutex::Mutex;
-use embassy_sync::{signal, zerocopy_channel};
+use embassy_sync::signal;
 use embassy_time::Duration;
 use embassy_time::Ticker;
 use embassy_time::Timer;
@@ -44,12 +46,16 @@ use leasehund::{
 use static_cell::StaticCell;
 use {defmt_rtt as _, panic_probe as _};
 
-static mut CORE1_STACK: Stack<4096> = Stack::new();
-static EXECUTOR0: StaticCell<Executor> = StaticCell::new();
-static EXECUTOR1: StaticCell<Executor> = StaticCell::new();
-static CHANNEL: Channel<CriticalSectionRawMutex, LedState, 1> = Channel::new();
+use embassy_sync::zerocopy_channel::{Channel as ZeroCopyChannel, Receiver, Sender};
+
+// static CHANNEL: Channel<CriticalSectionRawMutex, LedState, 1> = Channel::new();
 
 static STATE_CHANGED: signal::Signal<CriticalSectionRawMutex, ()> = signal::Signal::new();
+
+type Packet = [u8; 512];
+
+const PACKET_SIZE: usize = 512;
+const NUM_PACKETS: usize = 8;
 
 bind_interrupts!(struct Irqs {
     USBCTRL_IRQ => InterruptHandler<USB>;
@@ -125,23 +131,52 @@ fn main() -> ! {
     let p = embassy_rp::init(Default::default());
     let r = split_resources!(p);
 
+    static BUF0: StaticCell<[Packet; NUM_PACKETS]> = StaticCell::new();
+    let buf0 = BUF0.init([[0; PACKET_SIZE]; NUM_PACKETS]);
+
+    static BUF1: StaticCell<[Packet; NUM_PACKETS]> = StaticCell::new();
+    let buf1 = BUF1.init([[0; PACKET_SIZE]; NUM_PACKETS]);
+
+    static CHANNEL_0: StaticCell<ZeroCopyChannel<'_, CriticalSectionRawMutex, Packet>> =
+        StaticCell::new();
+    let channel0 = CHANNEL_0.init(ZeroCopyChannel::new(buf0));
+    let (sender0, receiver0) = channel0.split();
+
+    static CHANNEL_1: StaticCell<ZeroCopyChannel<'_, CriticalSectionRawMutex, Packet>> =
+        StaticCell::new();
+    let channel1 = CHANNEL_1.init(ZeroCopyChannel::new(buf1));
+    let (sender1, receiver1) = channel1.split();
+
+    static CORE1_STACK: StaticCell<Stack<8192>> = StaticCell::new();
+    let mut core1_stack = CORE1_STACK.init(Stack::new());
+
+    static EXECUTOR0: StaticCell<Executor> = StaticCell::new();
+    static EXECUTOR1: StaticCell<Executor> = StaticCell::new();
+
     spawn_core1(
         p.CORE1,
-        unsafe { &mut *core::ptr::addr_of_mut!(CORE1_STACK) },
+        unsafe { &mut *core::ptr::addr_of_mut!(core1_stack) },
         move || {
             let executor1 = EXECUTOR1.init(Executor::new());
-            executor1.run(|spawner| spawner.spawn(unwrap!(core1_task(spawner, r.core1))));
+            executor1.run(|spawner| {
+                spawner.spawn(unwrap!(core1_task(spawner, r.core1, sender0, receiver1)))
+            });
         },
     );
 
     let executor0 = EXECUTOR0.init(Executor::new());
     executor0.run(|spawner| {
-        spawner.spawn(unwrap!(core0_task(spawner, r.core0)));
+        spawner.spawn(unwrap!(core0_task(spawner, r.core0, sender1, receiver0)));
     });
 }
 
 #[embassy_executor::task]
-async fn core0_task(spawner: Spawner, p: Core0) {
+async fn core0_task(
+    spawner: Spawner,
+    p: Core0,
+    mut sender: Sender<'static, CriticalSectionRawMutex, Packet>,
+    mut receiver: Receiver<'static, CriticalSectionRawMutex, Packet>,
+) {
     let mut rng = RoscRng;
 
     // Create the driver, from the HAL.
@@ -256,21 +291,65 @@ async fn core0_task(spawner: Spawner, p: Core0) {
         log::info!("local local_endpoint {:?}", socket.local_endpoint());
 
         loop {
-            let n = match socket.read(&mut buf).await {
-                Ok(0) => {
+            /*
+                        let n = match socket.read(&mut buf).await {
+                            Ok(0) => {
+                                log::info!("read EOF");
+                                break;
+                            }
+                            Ok(n) => {
+                                log::info!("reading {}", n);
+                                n
+                            }
+                            Err(e) => {
+                                log::info!("read error: {:?}", e);
+                                break;
+                            }
+                        };
+            */
+            let n = match select(socket.read(&mut buf), receiver.receive()).await {
+                Either::First(Ok(0)) => {
                     log::info!("read EOF");
                     break;
                 }
-                Ok(n) => n,
-                Err(e) => {
+                Either::First(Ok(n)) => {
+                    log::info!("reading {}", n);
+                    n
+                }
+                Either::First(Err(e)) => {
                     log::info!("read error: {:?}", e);
                     break;
+                }
+                Either::Second(buf) => {
+                    log::info!("recv echo");
+                    match socket.write_all(buf).await {
+                        Ok(()) => {}
+                        Err(e) => {
+                            log::info!("write error: {:?}", e);
+                            receiver.receive_done();
+                            break;
+                        }
+                    };
+                    receiver.receive_done();
+                    log::info!("continuing");
+                    continue;
                 }
             };
 
             for (i, x) in buf[..n].iter().enumerate() {
                 log::info!("rxd {} {}", i, x);
             }
+
+            log::info!("sending packet to core 1");
+            let packet = sender.send().await;
+            let len = min(n, packet.len());
+            let (left, right) = packet.split_at_mut(len);
+            left.copy_from_slice(&buf[..len]);
+            right.fill(0);
+            sender.send_done();
+            log::info!("sent");
+
+            /*
 
             match socket.write_all(&buf[..n]).await {
                 Ok(()) => {}
@@ -279,6 +358,7 @@ async fn core0_task(spawner: Spawner, p: Core0) {
                     break;
                 }
             };
+            */
 
             let mut udp = UdpSocket::new(
                 stack,
@@ -324,13 +404,33 @@ enum LedState {
 }
 
 #[embassy_executor::task]
-async fn core1_task(_spawner: Spawner, p: Core1) {
+async fn core1_task(
+    _spawner: Spawner,
+    p: Core1,
+    mut sender: Sender<'static, CriticalSectionRawMutex, Packet>,
+    mut receiver: Receiver<'static, CriticalSectionRawMutex, Packet>,
+) {
     let mut led = Output::new(p.pin_25, Level::Low);
     STATE_CHANGED.wait().await;
 
     let mut seconds = Ticker::every(Duration::from_secs(1));
     loop {
-        seconds.next().await;
-        led.toggle();
+        match select(seconds.next(), receiver.receive()).await {
+            Either::First(_) => {
+                log::info!("toggle");
+                led.toggle();
+            }
+            Either::Second(buf) => {
+                log::info!("echo0");
+                let out = sender.send().await;
+                log::info!("echo1");
+                out.copy_from_slice(buf);
+                log::info!("echo2");
+                sender.send_done();
+                log::info!("echo3");
+                receiver.receive_done();
+                log::info!("echo4");
+            }
+        }
     }
 }
