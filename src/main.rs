@@ -1,4 +1,5 @@
-//! "~/git/embassy/examples/rp/src/bin/usb_ethernet.rs" 212L, 7599B
+//! https://github.com/embassy-rs/embassy/blob/main/examples/rp/src/bin/usb_ethernet.rs
+//!
 //! This example shows how to use USB (Universal Serial Bus) in the RP2040 chip.
 //!
 //! This is a CDC-NCM class implementation, aka Ethernet over USB.
@@ -6,17 +7,30 @@
 #![no_std]
 #![no_main]
 
+use assign_resources::assign_resources;
 use defmt::*;
+use embassy_executor::Executor;
 use embassy_executor::Spawner;
 use embassy_net::tcp::TcpSocket;
-use embassy_net::udp::{PacketMetadata, UdpMetadata, UdpSocket};
+use embassy_net::udp::{PacketMetadata, UdpSocket};
 use embassy_net::{
-    DhcpConfig, IpEndpoint, Ipv4Address, Ipv4Cidr, Stack, StackResources, StaticConfigV4,
+    IpEndpoint, Ipv4Address, Ipv4Cidr, Stack as NetStack, StackResources, StaticConfigV4,
 };
+use embassy_rp::Peri;
+use embassy_rp::Peripherals;
 use embassy_rp::clocks::RoscRng;
+use embassy_rp::gpio::{Level, Output};
+use embassy_rp::multicore::{Stack, spawn_core1};
 use embassy_rp::peripherals::USB;
 use embassy_rp::usb::{Driver, InterruptHandler};
 use embassy_rp::{bind_interrupts, peripherals};
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::channel::Channel;
+use embassy_sync::mutex::Mutex;
+use embassy_sync::{signal, zerocopy_channel};
+use embassy_time::Duration;
+use embassy_time::Ticker;
+use embassy_time::Timer;
 use embassy_usb::class::cdc_acm::{CdcAcmClass, State as AcmState};
 use embassy_usb::class::cdc_ncm::embassy_net::{Device, Runner, State as NetState};
 use embassy_usb::class::cdc_ncm::{CdcNcmClass, State as NcmState};
@@ -30,9 +44,25 @@ use leasehund::{
 use static_cell::StaticCell;
 use {defmt_rtt as _, panic_probe as _};
 
+static mut CORE1_STACK: Stack<4096> = Stack::new();
+static EXECUTOR0: StaticCell<Executor> = StaticCell::new();
+static EXECUTOR1: StaticCell<Executor> = StaticCell::new();
+static CHANNEL: Channel<CriticalSectionRawMutex, LedState, 1> = Channel::new();
+
+static STATE_CHANGED: signal::Signal<CriticalSectionRawMutex, ()> = signal::Signal::new();
+
 bind_interrupts!(struct Irqs {
     USBCTRL_IRQ => InterruptHandler<USB>;
 });
+
+assign_resources! {
+    core0: Core0{
+        usb: USB,
+    }
+    core1: Core1{
+        pin_25: PIN_25,
+    }
+}
 
 type MyDriver = Driver<'static, peripherals::USB>;
 
@@ -62,7 +92,7 @@ async fn log_task(logger: CdcAcmClass<'static, Driver<'static, USB>>) -> ! {
 }
 
 #[embassy_executor::task]
-async fn dhcp_task(mut server: DhcpServer<32, 4>, stack: Stack<'static>) -> ! {
+async fn dhcp_task(mut server: DhcpServer<32, 4>, stack: NetStack<'static>) -> ! {
     let mut buffers = DHCPServerBuffers::new();
     let mut socket = DHCPServerSocket::new(stack, &mut buffers);
     loop {
@@ -90,13 +120,32 @@ async fn dhcp_task(mut server: DhcpServer<32, 4>, stack: Stack<'static>) -> ! {
     }
 }
 
-#[embassy_executor::main]
-async fn main(spawner: Spawner) {
+#[cortex_m_rt::entry]
+fn main() -> ! {
     let p = embassy_rp::init(Default::default());
+    let r = split_resources!(p);
+
+    spawn_core1(
+        p.CORE1,
+        unsafe { &mut *core::ptr::addr_of_mut!(CORE1_STACK) },
+        move || {
+            let executor1 = EXECUTOR1.init(Executor::new());
+            executor1.run(|spawner| spawner.spawn(unwrap!(core1_task(spawner, r.core1))));
+        },
+    );
+
+    let executor0 = EXECUTOR0.init(Executor::new());
+    executor0.run(|spawner| {
+        spawner.spawn(unwrap!(core0_task(spawner, r.core0)));
+    });
+}
+
+#[embassy_executor::task]
+async fn core0_task(spawner: Spawner, p: Core0) {
     let mut rng = RoscRng;
 
     // Create the driver, from the HAL.
-    let driver = Driver::new(p.USB, Irqs);
+    let driver = Driver::new(p.usb, Irqs);
 
     // Create embassy-usb Config
     let mut config = Config::new(0xc0de, 0xcafe);
@@ -182,6 +231,7 @@ async fn main(spawner: Spawner) {
     spawner.spawn(unwrap!(net_task(runner)));
 
     // And now we can use it!
+    STATE_CHANGED.signal(());
 
     let mut rx_buffer = [0; 4096];
     let mut tx_buffer = [0; 4096];
@@ -265,5 +315,22 @@ async fn main(spawner: Spawner) {
             udp.flush().await;
             log::info!("flushed udp socket");
         }
+    }
+}
+
+enum LedState {
+    On,
+    Off,
+}
+
+#[embassy_executor::task]
+async fn core1_task(_spawner: Spawner, p: Core1) {
+    let mut led = Output::new(p.pin_25, Level::Low);
+    STATE_CHANGED.wait().await;
+
+    let mut seconds = Ticker::every(Duration::from_secs(1));
+    loop {
+        seconds.next().await;
+        led.toggle();
     }
 }
