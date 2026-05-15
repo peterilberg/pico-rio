@@ -31,6 +31,7 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::mutex::Mutex;
 use embassy_sync::signal;
 use embassy_time::Duration;
+use embassy_time::Instant;
 use embassy_time::Ticker;
 use embassy_time::Timer;
 use embassy_usb::class::cdc_acm::{CdcAcmClass, State as AcmState};
@@ -409,7 +410,7 @@ async fn core0_task(
             let mut status = [0_u8; 512];
             let msg = Header {
                 sender: 123,
-                time: 0,
+                time_ms: Instant::now().as_millis(),
                 kind: Kind::Status,
             };
             let result = to_slice(&msg, &mut status).unwrap();
@@ -449,10 +450,13 @@ async fn core1_task(
                 log::info!("toggle");
                 led.toggle();
             }
+
             Either::Second((meta0, buf)) => {
+                let now = Instant::now();
+                let milli = now.as_millis();
                 let header = Header {
                     sender: 123,
-                    time: 0,
+                    time_ms: milli,
                     kind: Kind::Echo,
                 };
                 log::info!("echo0");
@@ -495,6 +499,6 @@ enum Kind {
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq)]
 struct Header {
     sender: u32,
-    time: u32,
+    time_ms: u64,
     kind: Kind,
 }
