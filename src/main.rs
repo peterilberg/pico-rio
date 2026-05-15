@@ -14,7 +14,7 @@ use embassy_executor::Executor;
 use embassy_executor::Spawner;
 use embassy_futures::select::{Either, select};
 use embassy_net::tcp::TcpSocket;
-use embassy_net::udp::{PacketMetadata, UdpSocket};
+use embassy_net::udp::{PacketMetadata, UdpMetadata, UdpSocket};
 use embassy_net::{
     IpEndpoint, Ipv4Address, Ipv4Cidr, Stack as NetStack, StackResources, StaticConfigV4,
 };
@@ -54,7 +54,7 @@ use embassy_sync::zerocopy_channel::{Channel as ZeroCopyChannel, Receiver, Sende
 
 static STATE_CHANGED: signal::Signal<CriticalSectionRawMutex, ()> = signal::Signal::new();
 
-type Packet = [u8; 512];
+type Packet = (UdpMetadata, [u8; 512]);
 
 const PACKET_SIZE: usize = 512;
 const NUM_PACKETS: usize = 8;
@@ -133,11 +133,18 @@ fn main() -> ! {
     let p = embassy_rp::init(Default::default());
     let r = split_resources!(p);
 
+    let null_endpoint = IpEndpoint::new(
+        embassy_net::IpAddress::Ipv4(Ipv4Address::new(0, 0, 0, 0)),
+        0,
+    );
+
+    let meta = UdpMetadata::from(null_endpoint);
+
     static BUF0: StaticCell<[Packet; NUM_PACKETS]> = StaticCell::new();
-    let buf0 = BUF0.init([[0; PACKET_SIZE]; NUM_PACKETS]);
+    let buf0 = BUF0.init([(meta, [0; PACKET_SIZE]); NUM_PACKETS]);
 
     static BUF1: StaticCell<[Packet; NUM_PACKETS]> = StaticCell::new();
-    let buf1 = BUF1.init([[0; PACKET_SIZE]; NUM_PACKETS]);
+    let buf1 = BUF1.init([(meta, [0; PACKET_SIZE]); NUM_PACKETS]);
 
     static CHANNEL_0: StaticCell<ZeroCopyChannel<'_, CriticalSectionRawMutex, Packet>> =
         StaticCell::new();
@@ -272,6 +279,8 @@ async fn core0_task(
 
     let mut rx_buffer = [0; 4096];
     let mut tx_buffer = [0; 4096];
+    let mut rx_meta = [PacketMetadata::EMPTY; 8];
+    let mut tx_meta = [PacketMetadata::EMPTY; 8];
     let mut buf = [0; 4096];
 
     let mut udp_rx_buffer = [0; 4096];
@@ -279,18 +288,30 @@ async fn core0_task(
     let mut udp_rx_meta = [PacketMetadata::EMPTY; 8];
     let mut udp_tx_meta = [PacketMetadata::EMPTY; 8];
 
+    let local_endpoint = IpEndpoint::new(
+        embassy_net::IpAddress::Ipv4(Ipv4Address::new(192, 168, 7, 1)),
+        1234,
+    );
     loop {
-        let mut socket = TcpSocket::new(stack, &mut rx_buffer, &mut tx_buffer);
+        let mut socket = UdpSocket::new(
+            stack,
+            &mut rx_meta,
+            &mut rx_buffer,
+            &mut tx_meta,
+            &mut tx_buffer,
+        );
         //socket.set_timeout(Some(embassy_time::Duration::from_secs(10)));
 
-        log::info!("Listening on TCP:1234...");
-        if let Err(e) = socket.accept(1234).await {
-            log::info!("accept error: {:?}", e);
-            continue;
+        log::info!("Listening on UDP:1234...");
+        match socket.bind(local_endpoint) {
+            Ok(()) => {
+                log::info!("bound to {}", local_endpoint);
+            }
+            Err(e) => {
+                log::info!("bind {:?}", e);
+            }
         }
-
-        log::info!("Received connection from {:?}", socket.remote_endpoint());
-        log::info!("local local_endpoint {:?}", socket.local_endpoint());
+        log::info!("local local_endpoint {:?}", socket.endpoint());
 
         loop {
             /*
@@ -309,14 +330,15 @@ async fn core0_task(
                             }
                         };
             */
-            let n = match select(socket.read(&mut buf), receiver.receive()).await {
-                Either::First(Ok(0)) => {
+            let (n, meta) = match select(socket.recv_from(&mut buf), receiver.receive()).await {
+                Either::First(Ok((0, _))) => {
                     log::info!("read EOF");
                     break;
                 }
-                Either::First(Ok(n)) => {
+                Either::First(Ok((n, meta))) => {
+                    log::info!("connection from {:?}", meta.endpoint);
                     log::info!("reading {}", n);
-                    n
+                    (n, meta)
                 }
                 Either::First(Err(e)) => {
                     log::info!("read error: {:?}", e);
@@ -324,7 +346,7 @@ async fn core0_task(
                 }
                 Either::Second(buf) => {
                     log::info!("recv echo");
-                    match socket.write_all(buf).await {
+                    match socket.send_to(&buf.1, buf.0.endpoint).await {
                         Ok(()) => {}
                         Err(e) => {
                             log::info!("write error: {:?}", e);
@@ -344,10 +366,11 @@ async fn core0_task(
 
             log::info!("sending packet to core 1");
             let packet = sender.send().await;
-            let len = min(n, packet.len());
-            let (left, right) = packet.split_at_mut(len);
+            let len = min(n, packet.1.len());
+            let (left, right) = packet.1.split_at_mut(len);
             left.copy_from_slice(&buf[..len]);
             right.fill(0);
+            packet.0 = meta;
             sender.send_done();
             log::info!("sent");
 
@@ -368,10 +391,6 @@ async fn core0_task(
                 &mut udp_rx_buffer,
                 &mut udp_tx_meta,
                 &mut udp_tx_buffer,
-            );
-            let local_endpoint = IpEndpoint::new(
-                embassy_net::IpAddress::Ipv4(Ipv4Address::new(192, 168, 7, 1)),
-                12345,
             );
             // let local_endpoint = IpEndpoint::new(embassy_net::IpAddress::Ipv4(Ipv4Address::UNSPECIFIED), 12345);
             match udp.bind(local_endpoint) {
@@ -430,15 +449,17 @@ async fn core1_task(
                 log::info!("toggle");
                 led.toggle();
             }
-            Either::Second(buf) => {
+            Either::Second((meta0, buf)) => {
                 let header = Header {
                     sender: 123,
                     time: 0,
                     kind: Kind::Echo,
                 };
                 log::info!("echo0");
-                let out = sender.send().await;
+                let (meta, out) = sender.send().await;
                 log::info!("echo1");
+
+                *meta = *meta0;
 
                 let mut header_buf = [0; 64];
                 let x = to_slice(&header, &mut header_buf).unwrap();
