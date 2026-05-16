@@ -16,7 +16,8 @@ use embassy_futures::select::{Either, Either3, select, select3};
 use embassy_net::tcp::TcpSocket;
 use embassy_net::udp::{PacketMetadata, UdpMetadata, UdpSocket};
 use embassy_net::{
-    IpEndpoint, Ipv4Address, Ipv4Cidr, Stack as NetStack, StackResources, StaticConfigV4,
+    IpEndpoint, Ipv4Address, Ipv4Cidr, Runner as NetRunner, Stack as NetStack, StackResources,
+    StaticConfigV4,
 };
 use embassy_rp::Peri;
 use embassy_rp::Peripherals;
@@ -51,16 +52,14 @@ use serde::{Deserialize, Serialize};
 use static_cell::StaticCell;
 use {defmt_rtt as _, panic_probe as _};
 
-use embassy_sync::zerocopy_channel::{Channel as ZeroCopyChannel, Receiver, Sender};
-
-// static CHANNEL: Channel<CriticalSectionRawMutex, LedState, 1> = Channel::new();
+use embassy_sync::channel::{Channel, Receiver, Sender};
 
 static STATE_CHANGED: watch::Watch<CriticalSectionRawMutex, (), 32> = watch::Watch::new();
 static ALIVE: signal::Signal<CriticalSectionRawMutex, ()> = signal::Signal::new();
 
 const PACKET_SIZE: usize = 256;
 const NUM_PACKETS: usize = 8;
-type Packet = (UdpMetadata, [u8; PACKET_SIZE]);
+type Packet = (IpEndpoint, Message);
 
 bind_interrupts!(struct Irqs {
     USBCTRL_IRQ => InterruptHandler<USB>;
@@ -139,34 +138,43 @@ fn main() -> ! {
     let p = embassy_rp::init(Default::default());
     let r = split_resources!(p);
 
-    let null_endpoint = IpEndpoint::new(
+    let _null_endpoint = IpEndpoint::new(
         embassy_net::IpAddress::Ipv4(Ipv4Address::new(0, 0, 0, 0)),
         0,
     );
 
-    let meta = UdpMetadata::from(null_endpoint);
+    // let meta = UdpMetadata::from(null_endpoint);
+    /*
+        static BUF0: StaticCell<[Packet; NUM_PACKETS]> = StaticCell::new();
+        let buf0 = BUF0.init([(meta, [0; PACKET_SIZE]); NUM_PACKETS]);
 
-    static BUF0: StaticCell<[Packet; NUM_PACKETS]> = StaticCell::new();
-    let buf0 = BUF0.init([(meta, [0; PACKET_SIZE]); NUM_PACKETS]);
+        static BUF1: StaticCell<[Packet; NUM_PACKETS]> = StaticCell::new();
+        let buf1 = BUF1.init([(meta, [0; PACKET_SIZE]); NUM_PACKETS]);
+    */
+    static CHANNEL_0: StaticCell<Channel<CriticalSectionRawMutex, Packet, 16>> = StaticCell::new();
+    let channel0 = CHANNEL_0.init(Channel::new());
 
-    static BUF1: StaticCell<[Packet; NUM_PACKETS]> = StaticCell::new();
-    let buf1 = BUF1.init([(meta, [0; PACKET_SIZE]); NUM_PACKETS]);
+    // TODO zerocopy_channel is a single producer / single consumer channel
+    // replace with normal channel and pass messages / commands to core 1
+    // that is, decode and encode on core 0
 
-    static CHANNEL_0: StaticCell<ZeroCopyChannel<'_, CriticalSectionRawMutex, Packet>> =
-        StaticCell::new();
-    let channel0 = CHANNEL_0.init(ZeroCopyChannel::new(buf0));
-    let (sender0, receiver0) = channel0.split();
-
-    static CHANNEL_1: StaticCell<ZeroCopyChannel<'_, CriticalSectionRawMutex, Packet>> =
-        StaticCell::new();
-    let channel1 = CHANNEL_1.init(ZeroCopyChannel::new(buf1));
-    let (sender1, receiver1) = channel1.split();
+    static CHANNEL_1: StaticCell<Channel<CriticalSectionRawMutex, Packet, 16>> = StaticCell::new();
+    let channel1 = CHANNEL_1.init(Channel::new());
 
     static CORE1_STACK: StaticCell<Stack<8192>> = StaticCell::new();
     let mut core1_stack = CORE1_STACK.init(Stack::new());
 
     static EXECUTOR0: StaticCell<Executor> = StaticCell::new();
     static EXECUTOR1: StaticCell<Executor> = StaticCell::new();
+
+    let send_to_0_1 = channel0.sender();
+    let send_to_0_2 = channel0.sender();
+
+    let recv_fr_0_1 = channel1.receiver();
+
+    let send_to_1_1 = channel1.sender();
+
+    let recv_fr_1_1 = channel0.receiver();
 
     spawn_core1(
         p.CORE1,
@@ -180,8 +188,12 @@ fn main() -> ! {
                 )));
                 spawner.spawn(unwrap!(echo_task(
                     STATE_CHANGED.receiver().unwrap(),
-                    sender0,
-                    receiver1
+                    send_to_0_1,
+                    recv_fr_0_1
+                )));
+                spawner.spawn(unwrap!(health_task(
+                    STATE_CHANGED.receiver().unwrap(),
+                    send_to_0_2,
                 )));
             });
         },
@@ -189,23 +201,46 @@ fn main() -> ! {
 
     let executor0 = EXECUTOR0.init(Executor::new());
     executor0.run(|spawner| {
-        spawner.spawn(unwrap!(core0_task(
-            spawner, r.usb, r.watchdog, sender1, receiver0
+        let driver = get_usb_driver(r.usb);
+        let mut builder = get_usb_builder(driver);
+        let logger_class = get_logger(&mut builder);
+        let (usbrunner, device) = get_usb_network_device(&mut builder);
+
+        let (stack, runner) = get_network_stack(device);
+        let dhcp_server = get_dhcp_server();
+
+        spawner.spawn(unwrap!(usb_task(builder.build())));
+        spawner.spawn(unwrap!(usb_ncm_task(usbrunner)));
+
+        spawner.spawn(unwrap!(log_task(logger_class)));
+
+        spawner.spawn(unwrap!(dhcp_task(dhcp_server, stack)));
+        spawner.spawn(unwrap!(net_task(runner)));
+        spawner.spawn(unwrap!(wait_for_network(stack)));
+
+        spawner.spawn(unwrap!(watchdog_task(
+            r.watchdog,
+            STATE_CHANGED.receiver().unwrap(),
+        )));
+        spawner.spawn(unwrap!(udp_input_task(
+            stack,
+            STATE_CHANGED.receiver().unwrap(),
+            send_to_1_1,
+        )));
+        spawner.spawn(unwrap!(udp_output_task(
+            stack,
+            STATE_CHANGED.receiver().unwrap(),
+            recv_fr_1_1
         )));
     });
 }
 
-#[embassy_executor::task]
-async fn core0_task(
-    spawner: Spawner,
-    usb: UsbResources,
-    watchdog: WatchdogResources,
-    mut sender: Sender<'static, CriticalSectionRawMutex, Packet>,
-    mut receiver: Receiver<'static, CriticalSectionRawMutex, Packet>,
-) {
+fn get_usb_driver(usb: UsbResources) -> Driver<'static, USB> {
     // Create the driver, from the HAL.
-    let driver = Driver::new(usb.usb, Irqs);
+    Driver::new(usb.usb, Irqs)
+}
 
+fn get_usb_builder(driver: Driver<'static, USB>) -> Builder<'static, Driver<'static, USB>> {
     // Create embassy-usb Config
     let mut config = Config::new(0xc0de, 0xcafe);
     config.manufacturer = Some("Embassy");
@@ -218,39 +253,47 @@ async fn core0_task(
     static CONFIG_DESC: StaticCell<[u8; 256]> = StaticCell::new();
     static BOS_DESC: StaticCell<[u8; 256]> = StaticCell::new();
     static CONTROL_BUF: StaticCell<[u8; 128]> = StaticCell::new();
-    let mut builder = Builder::new(
+    Builder::new(
         driver,
         config,
         &mut CONFIG_DESC.init([0; 256])[..],
         &mut BOS_DESC.init([0; 256])[..],
         &mut [], // no msos descriptors
         &mut CONTROL_BUF.init([0; 128])[..],
-    );
+    )
+}
 
-    // Our MAC addr.
-    let our_mac_addr = [0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC];
+fn get_logger(
+    builder: &mut Builder<'static, Driver<'static, USB>>,
+) -> CdcAcmClass<'static, Driver<'static, USB>> {
+    // Create a class for the logger
+    static LOG_STATE: StaticCell<AcmState> = StaticCell::new();
+    CdcAcmClass::new(builder, LOG_STATE.init(AcmState::new()), 64)
+}
+
+fn get_usb_network_device(
+    builder: &mut Builder<'static, Driver<'static, USB>>,
+) -> (
+    Runner<'static, Driver<'static, USB>, MTU>,
+    Device<'static, MTU>,
+) {
     // Host's MAC addr. This is the MAC the host "thinks" its USB-to-ethernet adapter has.
     let host_mac_addr = [0x88, 0x88, 0x88, 0x88, 0x88, 0x88];
 
+    // Our MAC addr.
+    let our_mac_addr = [0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC];
+
     // Create classes on the builder.
     static STATE: StaticCell<NcmState> = StaticCell::new();
-    let class = CdcNcmClass::new(&mut builder, STATE.init(NcmState::new()), host_mac_addr, 64);
-
-    // Create a class for the logger
-    static LOG_STATE: StaticCell<AcmState> = StaticCell::new();
-    let logger_class = CdcAcmClass::new(&mut builder, LOG_STATE.init(AcmState::new()), 64);
-
-    // Build the builder.
-    let usb = builder.build();
-
-    spawner.spawn(unwrap!(usb_task(usb)));
-    spawner.spawn(unwrap!(log_task(logger_class)));
+    let class = CdcNcmClass::new(builder, STATE.init(NcmState::new()), host_mac_addr, 64);
 
     static NET_STATE: StaticCell<NetState<MTU, 4, 4>> = StaticCell::new();
-    let (runner, device) =
-        class.into_embassy_net_device::<MTU, 4, 4>(NET_STATE.init(NetState::new()), our_mac_addr);
-    spawner.spawn(unwrap!(usb_ncm_task(runner)));
+    class.into_embassy_net_device::<MTU, 4, 4>(NET_STATE.init(NetState::new()), our_mac_addr)
+}
 
+fn get_network_stack(
+    device: Device<'static, MTU>,
+) -> (NetStack<'static>, NetRunner<'static, Device<'static, MTU>>) {
     //let hostname = String::<32/*MAX_HOSTNAME_LEN*/>::try_from("picoRIO").unwrap();
     //let mut dhcp_config = DhcpConfig::default();
     //dhcp_config.hostname = Some(hostname);
@@ -267,11 +310,10 @@ async fn core0_task(
 
     // Init network stack
     static RESOURCES: StaticCell<StackResources<10>> = StaticCell::new();
-    let (stack, runner) =
-        embassy_net::new(device, config, RESOURCES.init(StackResources::new()), seed);
-    log::info!("waiting for config up");
-    stack.wait_config_up().await;
+    embassy_net::new(device, config, RESOURCES.init(StackResources::new()), seed)
+}
 
+fn get_dhcp_server() -> DhcpServer<32, 4> {
     let config: LeaseConfig<4> = DhcpConfigBuilder::new()
         .server_ip(Ipv4Address::new(192, 168, 7, 1))
         .subnet_mask(Ipv4Address::new(255, 255, 255, 0))
@@ -286,23 +328,48 @@ async fn core0_task(
         .lease_time(7200) // 2 hours
         .build();
 
-    let dhcp_server: DhcpServer<32, 4> = DhcpServer::with_config(config);
-    spawner.spawn(unwrap!(dhcp_task(dhcp_server, stack)));
-    spawner.spawn(unwrap!(net_task(runner)));
+    DhcpServer::with_config(config)
+}
+
+#[embassy_executor::task]
+async fn wait_for_network(stack: NetStack<'static>) {
+    log::info!("waiting for config up");
+    stack.wait_config_up().await;
 
     // And now we can use it!
     STATE_CHANGED.sender().send(());
+}
+
+#[embassy_executor::task]
+async fn watchdog_task(
+    watchdog: WatchdogResources,
+    mut watch: watch::Receiver<'static, CriticalSectionRawMutex, (), 32>,
+) {
+    watch.changed().await;
+
+    let mut watchdog = Watchdog::new(watchdog.watchdog);
+    watchdog.start(Duration::from_secs(3));
+
+    loop {
+        ALIVE.wait().await;
+        log::info!("still alive");
+        watchdog.feed(Duration::from_secs(3));
+    }
+}
+
+#[embassy_executor::task]
+async fn udp_input_task(
+    stack: NetStack<'static>,
+    mut watch: watch::Receiver<'static, CriticalSectionRawMutex, (), 32>,
+    sender: Sender<'static, CriticalSectionRawMutex, Packet, 16>,
+) {
+    watch.changed().await;
 
     let mut rx_buffer = [0; 4096];
     let mut tx_buffer = [0; 4096];
     let mut rx_meta = [PacketMetadata::EMPTY; 8];
     let mut tx_meta = [PacketMetadata::EMPTY; 8];
     let mut buf = [0; 4096];
-
-    let mut udp_rx_buffer = [0; 4096];
-    let mut udp_tx_buffer = [0; 4096];
-    let mut udp_rx_meta = [PacketMetadata::EMPTY; 8];
-    let mut udp_tx_meta = [PacketMetadata::EMPTY; 8];
 
     let local_endpoint = IpEndpoint::new(
         embassy_net::IpAddress::Ipv4(Ipv4Address::new(192, 168, 7, 1)),
@@ -328,133 +395,132 @@ async fn core0_task(
     }
     log::info!("local local_endpoint {:?}", socket.endpoint());
 
-    let mut watchdog = Watchdog::new(watchdog.watchdog);
-    watchdog.start(Duration::from_secs(3));
-
     loop {
-        /*
-                    let n = match socket.read(&mut buf).await {
-                        Ok(0) => {
-                            log::info!("read EOF");
-                            break;
-                        }
-                        Ok(n) => {
-                            log::info!("reading {}", n);
-                            n
-                        }
-                        Err(e) => {
-                            log::info!("read error: {:?}", e);
-                            break;
-                        }
-                    };
-        */
-        let (n, meta) =
-            match select3(socket.recv_from(&mut buf), receiver.receive(), ALIVE.wait()).await {
-                Either3::First(Ok((0, _))) => {
-                    log::info!("read EOF");
-                    watchdog.feed(Duration::from_secs(3));
-                    continue;
-                }
-                Either3::First(Ok((n, meta))) => {
-                    log::info!("connection from {:?}", meta.endpoint);
-                    log::info!("reading {}", n);
-                    watchdog.feed(Duration::from_secs(3));
-                    (n, meta)
-                }
-                Either3::First(Err(e)) => {
-                    log::info!("read error: {:?}", e);
-                    watchdog.feed(Duration::from_secs(3));
-                    continue;
-                }
-                Either3::Second(buf) => {
-                    log::info!("recv echo");
-                    match socket.send_to(&buf.1, buf.0.endpoint).await {
-                        Ok(()) => {}
-                        Err(e) => {
-                            log::info!("write error: {:?}", e);
-                        }
-                    };
-                    receiver.receive_done();
-                    log::info!("continuing");
-                    watchdog.feed(Duration::from_secs(3));
-                    continue;
-                }
-                Either3::Third(_) => {
-                    log::info!("nothing happened");
-                    watchdog.feed(Duration::from_secs(3));
-                    continue;
-                }
-            };
+        let (n, meta) = match socket.recv_from(&mut buf).await {
+            Ok((0, _)) => {
+                log::info!("read EOF");
+                continue;
+            }
+            Ok((n, meta)) => {
+                log::info!("connection from {:?}", meta.endpoint);
+                log::info!("reading {}", n);
+                (n, meta)
+            }
+            Err(e) => {
+                log::info!("read error: {:?}", e);
+                continue;
+            }
+        };
 
         for (i, x) in buf[..n].iter().enumerate() {
             log::info!("rxd {} {}", i, x);
         }
 
-        log::info!("sending packet to core 1");
-        let packet = sender.send().await;
-        let len = min(n, packet.1.len());
-        let (left, right) = packet.1.split_at_mut(len);
-        left.copy_from_slice(&buf[..len]);
-        right.fill(0);
-        packet.0 = meta;
-        sender.send_done();
-        log::info!("sent");
-
-        /*
-
-        match socket.write_all(&buf[..n]).await {
-            Ok(()) => {}
-            Err(e) => {
-                log::info!("write error: {:?}", e);
-                break;
+        log::info!("decoding message");
+        let msg = match from_bytes::<Message>(&buf[..]) {
+            Ok(h) => {
+                log::info!("message {:?}", h);
+                h
+            }
+            Err(x) => {
+                log::info!("invalid message ignored {}", x);
+                continue;
             }
         };
-        */
 
-        let mut udp = UdpSocket::new(
-            stack,
-            &mut udp_rx_meta,
-            &mut udp_rx_buffer,
-            &mut udp_tx_meta,
-            &mut udp_tx_buffer,
-        );
-        // let local_endpoint = IpEndpoint::new(embassy_net::IpAddress::Ipv4(Ipv4Address::UNSPECIFIED), 12345);
-        match udp.bind(local_endpoint) {
-            Ok(()) => {
-                log::info!("bound to {}", local_endpoint);
+        log::info!("sending packet to core 1");
+        sender.send((meta.endpoint, msg)).await;
+        log::info!("sent");
+    }
+}
+
+#[embassy_executor::task]
+async fn udp_output_task(
+    stack: NetStack<'static>,
+    mut watch: watch::Receiver<'static, CriticalSectionRawMutex, (), 32>,
+    receiver: Receiver<'static, CriticalSectionRawMutex, Packet, 16>,
+) {
+    watch.changed().await;
+
+    let mut rx_buffer = [0; 4096];
+    let mut tx_buffer = [0; 4096];
+    let mut rx_meta = [PacketMetadata::EMPTY; 8];
+    let mut tx_meta = [PacketMetadata::EMPTY; 8];
+    let mut buf = [0; 4096];
+
+    let local_endpoint = IpEndpoint::new(
+        embassy_net::IpAddress::Ipv4(Ipv4Address::new(192, 168, 7, 1)),
+        1234,
+    );
+
+    let mut socket = UdpSocket::new(
+        stack,
+        &mut rx_meta,
+        &mut rx_buffer,
+        &mut tx_meta,
+        &mut tx_buffer,
+    );
+
+    match socket.bind(local_endpoint) {
+        Ok(()) => {
+            log::info!("bound to {}", local_endpoint);
+        }
+        Err(e) => {
+            log::info!("bind {:?}", e);
+        }
+    }
+    log::info!("local local_endpoint {:?}", socket.endpoint());
+
+    loop {
+        let (endpoint, msg) = receiver.receive().await;
+
+        log::info!("recv echo");
+        let mut buf = [0_u8; 256];
+        match to_slice(&msg, &mut buf) {
+            Ok(x) => {
+                match socket.send_to(x, endpoint).await {
+                    Ok(()) => {
+                        log::info!("sent to network");
+                    }
+                    Err(e) => {
+                        log::info!("write error: {:?}", e);
+                    }
+                };
             }
             Err(e) => {
-                log::info!("bind {:?}", e);
+                log::info!("encoding failed {}", e);
             }
         }
+    }
+}
+
+#[embassy_executor::task]
+async fn health_task(
+    mut watch: watch::Receiver<'static, CriticalSectionRawMutex, (), 32>,
+    sender: Sender<'static, CriticalSectionRawMutex, Packet, 16>,
+) {
+    watch.changed().await;
+
+    let mut seconds = Ticker::every(Duration::from_secs(1));
+    loop {
+        seconds.next().await;
+        log::info!("health0");
         let remote_endpoint = IpEndpoint::new(
             embassy_net::IpAddress::Ipv4(Ipv4Address::new(192, 168, 64, 47)),
             12345,
         );
 
-        let mut status = [0_u8; PACKET_SIZE];
         let msg = Message {
             sender: 123,
             time_ms: Instant::now().as_millis(),
             kind: Kind::Status,
         };
-        let result = to_slice(&msg, &mut status).unwrap();
-        match udp.send_to(&result, remote_endpoint).await {
-            Ok(()) => {
-                log::info!("sent to {}", remote_endpoint);
-            }
-            Err(e) => {
-                log::info!("send_to {:?}", e)
-            }
-        }
-        udp.flush().await;
-        log::info!("flushed udp socket");
-    }
-}
+        log::info!("health2");
+        sender.send((remote_endpoint, msg)).await;
+        log::info!("health3");
 
-enum LedState {
-    On,
-    Off,
+        ALIVE.signal(());
+    }
 }
 
 #[embassy_executor::task]
@@ -477,44 +543,21 @@ async fn digital_output_task(
 #[embassy_executor::task]
 async fn echo_task(
     mut watch: watch::Receiver<'static, CriticalSectionRawMutex, (), 32>,
-    mut sender: Sender<'static, CriticalSectionRawMutex, Packet>,
-    mut receiver: Receiver<'static, CriticalSectionRawMutex, Packet>,
+    sender: Sender<'static, CriticalSectionRawMutex, Packet, 16>,
+    receiver: Receiver<'static, CriticalSectionRawMutex, Packet, 16>,
 ) {
     watch.changed().await;
     loop {
-        let (meta0, buf) = receiver.receive().await;
-        let now = Instant::now();
-        let milli = now.as_millis();
-        let mut buf2 = [0_u8; 32];
-        let len = buf2.len();
-        buf2.copy_from_slice(&buf[..len]);
+        let (meta0, msg) = receiver.receive().await;
+        log::info!("echo0");
         let header = Message {
             sender: 123,
-            time_ms: milli,
-            kind: Kind::Echo(buf2),
+            time_ms: Instant::now().as_millis(),
+            kind: msg.kind,
         };
-        log::info!("echo0");
-        let (meta, out) = sender.send().await;
         log::info!("echo1");
-
-        *meta = *meta0;
-
-        let _ = to_slice(&header, out).unwrap();
+        sender.send((meta0, header)).await;
         log::info!("echo2");
-
-        let y = from_bytes::<Message>(out);
-        match y {
-            Ok(h) => {
-                log::info!("header {:?}", h);
-            }
-            Err(x) => {
-                log::info!("header err {}", x);
-            }
-        }
-        sender.send_done();
-        log::info!("echo3");
-        receiver.receive_done();
-        log::info!("echo4");
     }
 }
 
