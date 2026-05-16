@@ -31,6 +31,7 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_rp::watchdog::Watchdog;
 use embassy_sync::mutex::Mutex;
 use embassy_sync::signal;
+use embassy_sync::watch;
 use embassy_time::Duration;
 use embassy_time::Instant;
 use embassy_time::Ticker;
@@ -54,7 +55,7 @@ use embassy_sync::zerocopy_channel::{Channel as ZeroCopyChannel, Receiver, Sende
 
 // static CHANNEL: Channel<CriticalSectionRawMutex, LedState, 1> = Channel::new();
 
-static STATE_CHANGED: signal::Signal<CriticalSectionRawMutex, ()> = signal::Signal::new();
+static STATE_CHANGED: watch::Watch<CriticalSectionRawMutex, (), 32> = watch::Watch::new();
 static ALIVE: signal::Signal<CriticalSectionRawMutex, ()> = signal::Signal::new();
 
 const PACKET_SIZE: usize = 256;
@@ -173,12 +174,15 @@ fn main() -> ! {
         move || {
             let executor1 = EXECUTOR1.init(Executor::new());
             executor1.run(|spawner| {
-                spawner.spawn(unwrap!(core1_task(
-                    spawner,
-                    r.digitalOut,
+                spawner.spawn(unwrap!(digital_output_task(
+                    STATE_CHANGED.receiver().unwrap(),
+                    r.digitalOut
+                )));
+                spawner.spawn(unwrap!(echo_task(
+                    STATE_CHANGED.receiver().unwrap(),
                     sender0,
                     receiver1
-                )))
+                )));
             });
         },
     );
@@ -199,10 +203,6 @@ async fn core0_task(
     mut sender: Sender<'static, CriticalSectionRawMutex, Packet>,
     mut receiver: Receiver<'static, CriticalSectionRawMutex, Packet>,
 ) {
-    let mut rng = RoscRng;
-
-    let mut watchdog = Watchdog::new(watchdog.watchdog);
-
     // Create the driver, from the HAL.
     let driver = Driver::new(usb.usb, Irqs);
 
@@ -262,6 +262,7 @@ async fn core0_task(
     });
 
     // Generate random seed
+    let mut rng = RoscRng;
     let seed = rng.next_u64();
 
     // Init network stack
@@ -290,7 +291,7 @@ async fn core0_task(
     spawner.spawn(unwrap!(net_task(runner)));
 
     // And now we can use it!
-    STATE_CHANGED.signal(());
+    STATE_CHANGED.sender().send(());
 
     let mut rx_buffer = [0; 4096];
     let mut tx_buffer = [0; 4096];
@@ -327,6 +328,7 @@ async fn core0_task(
     }
     log::info!("local local_endpoint {:?}", socket.endpoint());
 
+    let mut watchdog = Watchdog::new(watchdog.watchdog);
     watchdog.start(Duration::from_secs(3));
 
     loop {
@@ -456,59 +458,63 @@ enum LedState {
 }
 
 #[embassy_executor::task]
-async fn core1_task(
-    _spawner: Spawner,
+async fn digital_output_task(
+    mut watch: watch::Receiver<'static, CriticalSectionRawMutex, (), 32>,
     p: DigitalOutResources,
+) {
+    watch.changed().await;
+
+    let mut led = Output::new(p.pin_25, Level::Low);
+    let mut seconds = Ticker::every(Duration::from_secs(1));
+    loop {
+        seconds.next().await;
+        log::info!("toggle");
+        led.toggle();
+        ALIVE.signal(());
+    }
+}
+
+#[embassy_executor::task]
+async fn echo_task(
+    mut watch: watch::Receiver<'static, CriticalSectionRawMutex, (), 32>,
     mut sender: Sender<'static, CriticalSectionRawMutex, Packet>,
     mut receiver: Receiver<'static, CriticalSectionRawMutex, Packet>,
 ) {
-    let mut led = Output::new(p.pin_25, Level::Low);
-    STATE_CHANGED.wait().await;
-
-    let mut seconds = Ticker::every(Duration::from_secs(1));
+    watch.changed().await;
     loop {
-        match select(seconds.next(), receiver.receive()).await {
-            Either::First(_) => {
-                log::info!("toggle");
-                led.toggle();
-                ALIVE.signal(());
+        let (meta0, buf) = receiver.receive().await;
+        let now = Instant::now();
+        let milli = now.as_millis();
+        let mut buf2 = [0_u8; 32];
+        let len = buf2.len();
+        buf2.copy_from_slice(&buf[..len]);
+        let header = Message {
+            sender: 123,
+            time_ms: milli,
+            kind: Kind::Echo(buf2),
+        };
+        log::info!("echo0");
+        let (meta, out) = sender.send().await;
+        log::info!("echo1");
+
+        *meta = *meta0;
+
+        let _ = to_slice(&header, out).unwrap();
+        log::info!("echo2");
+
+        let y = from_bytes::<Message>(out);
+        match y {
+            Ok(h) => {
+                log::info!("header {:?}", h);
             }
-
-            Either::Second((meta0, buf)) => {
-                let now = Instant::now();
-                let milli = now.as_millis();
-                let mut buf2 = [0_u8; 32];
-                let len = buf2.len();
-                buf2.copy_from_slice(&buf[..len]);
-                let header = Message {
-                    sender: 123,
-                    time_ms: milli,
-                    kind: Kind::Echo(buf2),
-                };
-                log::info!("echo0");
-                let (meta, out) = sender.send().await;
-                log::info!("echo1");
-
-                *meta = *meta0;
-
-                let _ = to_slice(&header, out).unwrap();
-                log::info!("echo2");
-
-                let y = from_bytes::<Message>(out);
-                match y {
-                    Ok(h) => {
-                        log::info!("header {:?}", h);
-                    }
-                    Err(x) => {
-                        log::info!("header err {}", x);
-                    }
-                }
-                sender.send_done();
-                log::info!("echo3");
-                receiver.receive_done();
-                log::info!("echo4");
+            Err(x) => {
+                log::info!("header err {}", x);
             }
         }
+        sender.send_done();
+        log::info!("echo3");
+        receiver.receive_done();
+        log::info!("echo4");
     }
 }
 
