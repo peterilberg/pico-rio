@@ -57,10 +57,9 @@ use embassy_sync::zerocopy_channel::{Channel as ZeroCopyChannel, Receiver, Sende
 static STATE_CHANGED: signal::Signal<CriticalSectionRawMutex, ()> = signal::Signal::new();
 static ALIVE: signal::Signal<CriticalSectionRawMutex, ()> = signal::Signal::new();
 
-type Packet = (UdpMetadata, [u8; 512]);
-
-const PACKET_SIZE: usize = 512;
+const PACKET_SIZE: usize = 256;
 const NUM_PACKETS: usize = 8;
+type Packet = (UdpMetadata, [u8; PACKET_SIZE]);
 
 bind_interrupts!(struct Irqs {
     USBCTRL_IRQ => InterruptHandler<USB>;
@@ -431,8 +430,8 @@ async fn core0_task(
             12345,
         );
 
-        let mut status = [0_u8; 512];
-        let msg = Header {
+        let mut status = [0_u8; PACKET_SIZE];
+        let msg = Message {
             sender: 123,
             time_ms: Instant::now().as_millis(),
             kind: Kind::Status,
@@ -478,10 +477,13 @@ async fn core1_task(
             Either::Second((meta0, buf)) => {
                 let now = Instant::now();
                 let milli = now.as_millis();
-                let header = Header {
+                let mut buf2 = [0_u8; 32];
+                let len = buf2.len();
+                buf2.copy_from_slice(&buf[..len]);
+                let header = Message {
                     sender: 123,
                     time_ms: milli,
-                    kind: Kind::Echo,
+                    kind: Kind::Echo(buf2),
                 };
                 log::info!("echo0");
                 let (meta, out) = sender.send().await;
@@ -489,14 +491,10 @@ async fn core1_task(
 
                 *meta = *meta0;
 
-                let mut header_buf = [0; 64];
-                let x = to_slice(&header, &mut header_buf).unwrap();
-                let (head, rest) = out.split_at_mut(x.len());
-                head.copy_from_slice(x);
-                rest.copy_from_slice(&buf[..rest.len()]);
+                let _ = to_slice(&header, out).unwrap();
                 log::info!("echo2");
 
-                let y = from_bytes::<Header>(out);
+                let y = from_bytes::<Message>(out);
                 match y {
                     Ok(h) => {
                         log::info!("header {:?}", h);
@@ -517,11 +515,11 @@ async fn core1_task(
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq)]
 enum Kind {
     Status,
-    Echo,
+    Echo([u8; 32]),
 }
 
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq)]
-struct Header {
+struct Message {
     sender: u32,
     time_ms: u64,
     kind: Kind,
