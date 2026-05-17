@@ -194,10 +194,6 @@ fn main() -> ! {
                     send_to_0_1,
                     recv_fr_0_1
                 )));
-                spawner.spawn(unwrap!(health_task(
-                    STATE_CHANGED.receiver().unwrap(),
-                    send_to_0_2,
-                )));
             });
         },
     );
@@ -438,6 +434,23 @@ async fn udp_input_task(
             }
         };
 
+        match msg.kind {
+            Kind::DigitalOut { pin_25 } => {
+                log::info!("setting pin 25 to {:?}", pin_25);
+                send_to_channel(
+                    &DO_CHANNEL,
+                    DigitalOutMessages::Set {
+                        pin: 25,
+                        level: pin_25,
+                    },
+                )
+                .await;
+            }
+            _ => {
+                log::info!("ignoring message {:?}", msg.kind);
+            }
+        }
+
         log::info!("sending packet to core 1");
         sender.send((meta.endpoint, msg)).await;
         log::info!("sent");
@@ -504,38 +517,6 @@ async fn udp_output_task(
     }
 }
 
-#[embassy_executor::task]
-async fn health_task(
-    mut watch: watch::Receiver<'static, CriticalSectionRawMutex, (), 32>,
-    sender: Sender<'static, CriticalSectionRawMutex, Packet, 16>,
-) {
-    watch.changed().await;
-
-    let mut seconds = Ticker::every(Duration::from_secs(1));
-    loop {
-        seconds.next().await;
-        log::info!("health0");
-        let remote_endpoint = IpEndpoint::new(
-            embassy_net::IpAddress::Ipv4(Ipv4Address::new(192, 168, 64, 47)),
-            12345,
-        );
-
-        let msg = Message {
-            sender: 123,
-            time_ms: Instant::now().as_millis(),
-            exec_ms: Duration::from_secs(0).as_millis(),
-            jitter_ms: Duration::from_secs(0).as_millis(),
-            period_ms: Duration::from_secs(0).as_millis(),
-            kind: Kind::Status,
-        };
-        log::info!("health2");
-        sender.send((remote_endpoint, msg)).await;
-        log::info!("health3");
-
-        ALIVE.signal(());
-    }
-}
-
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Clone, Copy)]
 enum DigitalLevel {
     Off,
@@ -593,12 +574,19 @@ async fn digital_output_task(
         log::info!("digital out 0");
         match msg {
             None => {
+                log::info!(
+                    "times: {} {} {} {}",
+                    diff_time.as_micros(),
+                    jitter.as_micros(),
+                    start_time.as_millis(),
+                    end_time.as_millis()
+                );
                 let header = Message {
                     sender: 123,
-                    time_ms: Instant::now().as_millis(),
-                    exec_ms: diff_time.as_millis(),
-                    jitter_ms: jitter.as_millis(),
-                    period_ms: Duration::from_secs(1).as_millis(),
+                    time_ms: Instant::now().as_micros(),
+                    exec_ms: diff_time.as_micros(),
+                    jitter_ms: jitter.as_micros(),
+                    period_ms: Duration::from_secs(1).as_micros(),
                     kind: Kind::DigitalOut {
                         pin_25: match pin_25.get_output_level() {
                             Level::Low => DigitalLevel::Off,
@@ -658,6 +646,7 @@ enum Kind {
     DigitalOut { pin_25: DigitalLevel },
 }
 
+// TODO change times to microseconds
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq)]
 struct Message {
     sender: u32,
