@@ -28,6 +28,7 @@ use embassy_rp::peripherals::USB;
 use embassy_rp::usb::{Driver, InterruptHandler};
 use embassy_rp::{bind_interrupts, peripherals};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_usb_driver::host::pipe::In;
 // use embassy_sync::channel::Channel;
 use embassy_rp::watchdog::Watchdog;
 use embassy_sync::mutex::Mutex;
@@ -169,6 +170,7 @@ fn main() -> ! {
 
     let send_to_0_1 = channel0.sender();
     let send_to_0_2 = channel0.sender();
+    let send_to_0_3 = channel0.sender();
 
     let recv_fr_0_1 = channel1.receiver();
 
@@ -184,6 +186,7 @@ fn main() -> ! {
             executor1.run(|spawner| {
                 spawner.spawn(unwrap!(digital_output_task(
                     STATE_CHANGED.receiver().unwrap(),
+                    send_to_0_3,
                     r.digitalOut
                 )));
                 spawner.spawn(unwrap!(echo_task(
@@ -394,6 +397,7 @@ async fn udp_input_task(
         }
     }
     log::info!("local local_endpoint {:?}", socket.endpoint());
+    let mut level = DigitalLevel::Off;
 
     loop {
         let (n, meta) = match socket.recv_from(&mut buf).await {
@@ -424,6 +428,12 @@ async fn udp_input_task(
             }
             Err(x) => {
                 log::info!("invalid message ignored {}", x);
+
+                level = match level {
+                    DigitalLevel::Off => DigitalLevel::On,
+                    DigitalLevel::On => DigitalLevel::Off,
+                };
+                send_to_channel(&DO_CHANNEL, DigitalOutMessages::Set { pin: 25, level }).await;
                 continue;
             }
         };
@@ -513,6 +523,9 @@ async fn health_task(
         let msg = Message {
             sender: 123,
             time_ms: Instant::now().as_millis(),
+            exec_ms: Duration::from_secs(0).as_millis(),
+            jitter_ms: Duration::from_secs(0).as_millis(),
+            period_ms: Duration::from_secs(0).as_millis(),
             kind: Kind::Status,
         };
         log::info!("health2");
@@ -523,19 +536,93 @@ async fn health_task(
     }
 }
 
+#[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Clone, Copy)]
+enum DigitalLevel {
+    Off,
+    On,
+}
+
+#[derive(Serialize, Deserialize, Debug, Eq, PartialEq)]
+enum DigitalOutMessages {
+    Set { pin: u8, level: DigitalLevel },
+}
+
+static DO_CHANNEL: Channel<CriticalSectionRawMutex, DigitalOutMessages, 16> = Channel::new();
+
+async fn send_to_channel<T>(channel: &Channel<CriticalSectionRawMutex, T, 16>, value: T) {
+    channel.send(value).await;
+}
+
 #[embassy_executor::task]
 async fn digital_output_task(
     mut watch: watch::Receiver<'static, CriticalSectionRawMutex, (), 32>,
+    sender: Sender<'static, CriticalSectionRawMutex, Packet, 16>,
     p: DigitalOutResources,
 ) {
     watch.changed().await;
 
-    let mut led = Output::new(p.pin_25, Level::Low);
+    let remote_endpoint = IpEndpoint::new(
+        embassy_net::IpAddress::Ipv4(Ipv4Address::new(192, 168, 64, 47)),
+        12345,
+    );
+
+    let mut pin_25 = Output::new(p.pin_25, Level::Low);
+
     let mut seconds = Ticker::every(Duration::from_secs(1));
+
+    let mut start_time = Instant::now();
     loop {
-        seconds.next().await;
-        log::info!("toggle");
-        led.toggle();
+        let end_time = Instant::now();
+        let diff_time = end_time
+            .checked_duration_since(start_time)
+            .unwrap_or(Duration::from_secs(0));
+
+        let msg = match select(seconds.next(), DO_CHANNEL.receiver().receive()).await {
+            Either::First(()) => None,
+            Either::Second(msg) => Some(msg),
+        };
+
+        let jitter = match start_time.checked_add(Duration::from_secs(1)) {
+            None => Duration::from_secs(0),
+            Some(expected) => Instant::now()
+                .checked_duration_since(expected)
+                .unwrap_or(Duration::from_secs(0)),
+        };
+        start_time = Instant::now();
+
+        log::info!("digital out 0");
+        match msg {
+            None => {
+                let header = Message {
+                    sender: 123,
+                    time_ms: Instant::now().as_millis(),
+                    exec_ms: diff_time.as_millis(),
+                    jitter_ms: jitter.as_millis(),
+                    period_ms: Duration::from_secs(1).as_millis(),
+                    kind: Kind::DigitalOut {
+                        pin_25: match pin_25.get_output_level() {
+                            Level::Low => DigitalLevel::Off,
+                            Level::High => DigitalLevel::On,
+                        },
+                    },
+                };
+                log::info!("digital out 5");
+                sender.send((remote_endpoint, header)).await;
+                log::info!("digital out 6");
+            }
+            Some(DigitalOutMessages::Set { pin: 25, level }) => {
+                log::info!("digital out 1");
+                pin_25.set_level(match level {
+                    DigitalLevel::Off => Level::Low,
+                    DigitalLevel::On => Level::High,
+                });
+                log::info!("digital out 2");
+            }
+            Some(_) => {
+                log::info!("digital out 2");
+            }
+        }
+
         ALIVE.signal(());
     }
 }
@@ -553,6 +640,9 @@ async fn echo_task(
         let header = Message {
             sender: 123,
             time_ms: Instant::now().as_millis(),
+            exec_ms: Duration::from_secs(0).as_millis(),
+            jitter_ms: Duration::from_secs(0).as_millis(),
+            period_ms: Duration::from_secs(0).as_millis(),
             kind: msg.kind,
         };
         log::info!("echo1");
@@ -565,11 +655,15 @@ async fn echo_task(
 enum Kind {
     Status,
     Echo([u8; 32]),
+    DigitalOut { pin_25: DigitalLevel },
 }
 
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq)]
 struct Message {
     sender: u32,
     time_ms: u64,
+    exec_ms: u64,
+    jitter_ms: u64,
+    period_ms: u64,
     kind: Kind,
 }
