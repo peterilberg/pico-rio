@@ -48,6 +48,7 @@ use leasehund::{
     DHCPServerBuffers, DHCPServerSocket, DhcpConfig as LeaseConfig, DhcpConfigBuilder, DhcpServer,
     TransactionEvent,
 };
+use messages::{DigitalLevel, Kind, Message};
 use postcard::{from_bytes, to_slice};
 use serde::{Deserialize, Serialize};
 use static_cell::StaticCell;
@@ -517,12 +518,6 @@ async fn udp_output_task(
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Clone, Copy)]
-enum DigitalLevel {
-    Off,
-    On,
-}
-
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq)]
 enum DigitalOutMessages {
     Set { pin: u8, level: DigitalLevel },
@@ -637,22 +632,4 @@ async fn echo_task(
         sender.send((meta0, header)).await;
         log::info!("echo2");
     }
-}
-
-#[derive(Serialize, Deserialize, Debug, Eq, PartialEq)]
-enum Kind {
-    Status,
-    Echo([u8; 32]),
-    DigitalOut { pin_25: DigitalLevel },
-}
-
-// TODO change times to microseconds
-#[derive(Serialize, Deserialize, Debug, Eq, PartialEq)]
-struct Message {
-    sender: u32,
-    time_ms: u64,
-    exec_ms: u64,
-    jitter_ms: u64,
-    period_ms: u64,
-    kind: Kind,
 }

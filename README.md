@@ -32,25 +32,26 @@ send messages to virtual machines running on the host.
 ## Building
 
 1. Clone the repository.
-2. Initialize the pico-sdk submodule:
+2. Cargo currently does not support packages with different target architectures in the same workspace. You have to build the packages manually.
+   a. Build the shared `messages` library:
 
-        pushd pico-sdk/
-        git submodule update --init
+        pushd messages
+        cargo build
         popd
 
-3. Build `pico-usb-ethernet.uf2`:
+   b. Build the `tools`:
 
-        mkdir build
-        cmake -S . -B build
-        cmake --build build
-
-4. Build associated tools:
-
-        pushd tools/
-        mkdir build
-        cmake -S . -B build
-        cmake --build build
+        pushd tools
+        cargo build
         popd
+
+   c. Build `pico-rio.uf2`:
+
+        pushd pico
+        cargo run --release
+        popd
+
+      *Note*: We build `pico-rio.uf2`, we don't install it. Edit `.cargo/config.toml` if you want to build and install it on your Raspberry Pi Pico with `probe-rs`.
 
 ## Use
 

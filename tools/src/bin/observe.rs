@@ -1,29 +1,6 @@
+use messages::{DigitalLevel, Kind, Message};
 use postcard::{from_bytes, to_slice};
-use serde::{Deserialize, Serialize};
 use tokio::net::UdpSocket;
-
-#[derive(Serialize, Deserialize, Debug, Eq, PartialEq)]
-enum Kind {
-    Status,
-    Echo([u8; 32]),
-    DigitalOut { pin_25: DigitalLevel },
-}
-
-#[derive(Serialize, Deserialize, Debug, Eq, PartialEq)]
-struct Message {
-    sender: u32,
-    time_ms: u64,
-    exec_ms: u64,
-    jitter_ms: u64,
-    period_ms: u64,
-    kind: Kind,
-}
-
-#[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Clone, Copy)]
-enum DigitalLevel {
-    Off,
-    On,
-}
 
 #[tokio::main]
 async fn main() {
