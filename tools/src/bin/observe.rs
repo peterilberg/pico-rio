@@ -1,5 +1,5 @@
-use messages::{DigitalLevel, Kind, Message};
-use postcard::{from_bytes, to_slice};
+use messages::{Diagnostics, Notification};
+use postcard::from_bytes;
 use tokio::net::UdpSocket;
 
 #[tokio::main]
@@ -8,20 +8,27 @@ async fn main() {
 
     let mut buffer = [0_u8; 1024];
     loop {
-        let (len, addr) = socket.recv_from(&mut buffer).await.unwrap();
-        match from_bytes::<Message>(&buffer) {
-            Ok(msg) => {
+        let (_len, addr) = socket.recv_from(&mut buffer).await.unwrap();
+        match from_bytes::<(Notification, Diagnostics)>(&buffer) {
+            Ok((n, diag)) => {
                 println!(
-                    "{} ({}) @ {} ms with period {} ms took {} ms jitter {} ms",
-                    msg.sender, addr, msg.time_ms, msg.period_ms, msg.exec_ms, msg.jitter_ms
+                    "{} @ {} ms with period {} ms took {} ms jitter {} ms",
+                    addr,
+                    diag.timestamp_us,
+                    diag.period_in_us,
+                    diag.execution_us,
+                    diag.jitter_in_us
                 );
-                match msg.kind {
-                    Kind::DigitalOut { pin_25 } => {
+                match n {
+                    Notification::DO {
+                        pins: [(pin, level)],
+                    } => {
                         println!(
-                            "    digital_out: pin_25 {}",
-                            match pin_25 {
-                                DigitalLevel::Off => "off",
-                                DigitalLevel::On => "on",
+                            "    digital_out: pin {} {}",
+                            pin,
+                            match level {
+                                false => "off",
+                                true => "on",
                             }
                         );
                     }

@@ -1,5 +1,5 @@
-use messages::{DigitalLevel, Kind, Message};
-use postcard::{from_bytes, to_slice};
+use messages::Command;
+use postcard::to_slice;
 use std::{env, net::SocketAddr};
 use tokio::net::UdpSocket;
 
@@ -10,18 +10,9 @@ async fn main() {
 
     match args2[1..] {
         ["digital_out", "set", "25", level] => {
-            let message = Message {
-                sender: 0,
-                time_ms: 0,
-                exec_ms: 0,
-                jitter_ms: 0,
-                period_ms: 0,
-                kind: Kind::DigitalOut {
-                    pin_25: match level {
-                        "on" => DigitalLevel::On,
-                        _ => DigitalLevel::Off,
-                    },
-                },
+            let message = Command::SetDO {
+                pin: 25,
+                value: matches!(level, "on"),
             };
 
             let socket = UdpSocket::bind("0.0.0.0:0").await.unwrap();

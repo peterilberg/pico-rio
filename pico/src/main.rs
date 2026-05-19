@@ -7,77 +7,56 @@
 #![no_std]
 #![no_main]
 
-use assign_resources::assign_resources;
-use core::cmp::{max, min};
 use defmt::*;
 use embassy_executor::Executor;
-use embassy_executor::Spawner;
-use embassy_futures::select::{Either, Either3, select, select3};
-use embassy_net::tcp::TcpSocket;
-use embassy_net::udp::{PacketMetadata, UdpMetadata, UdpSocket};
+use embassy_futures::select::{Either, select};
+use embassy_net::udp::{PacketMetadata, UdpSocket};
 use embassy_net::{
     IpEndpoint, Ipv4Address, Ipv4Cidr, Runner as NetRunner, Stack as NetStack, StackResources,
     StaticConfigV4,
 };
 use embassy_rp::Peri;
-use embassy_rp::Peripherals;
 use embassy_rp::clocks::RoscRng;
 use embassy_rp::gpio::{Level, Output};
 use embassy_rp::multicore::{Stack, spawn_core1};
-use embassy_rp::peripherals::USB;
+use embassy_rp::peripherals::{USB, WATCHDOG};
 use embassy_rp::usb::{Driver, InterruptHandler};
+use embassy_rp::watchdog::Watchdog;
 use embassy_rp::{bind_interrupts, peripherals};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-use embassy_usb_driver::host::pipe::In;
-// use embassy_sync::channel::Channel;
-use embassy_rp::watchdog::Watchdog;
-use embassy_sync::mutex::Mutex;
 use embassy_sync::signal;
 use embassy_sync::watch;
 use embassy_time::Duration;
 use embassy_time::Instant;
 use embassy_time::Ticker;
-use embassy_time::Timer;
 use embassy_usb::class::cdc_acm::{CdcAcmClass, State as AcmState};
 use embassy_usb::class::cdc_ncm::embassy_net::{Device, Runner, State as NetState};
 use embassy_usb::class::cdc_ncm::{CdcNcmClass, State as NcmState};
 use embassy_usb::{Builder, Config, UsbDevice};
-// use embedded_io_async::Write;
-use heapless::Vec;
+
+use heapless::{LinearMap, Vec};
 use leasehund::{
     DHCPServerBuffers, DHCPServerSocket, DhcpConfig as LeaseConfig, DhcpConfigBuilder, DhcpServer,
     TransactionEvent,
 };
-use messages::{DigitalLevel, Kind, Message};
+use messages::{Command, Diagnostics, Notification};
 use postcard::{from_bytes, to_slice};
 use serde::{Deserialize, Serialize};
 use static_cell::StaticCell;
 use {defmt_rtt as _, panic_probe as _};
 
-use embassy_sync::channel::{Channel, Receiver, Sender};
+use embassy_sync::channel::Channel;
 
 static STATE_CHANGED: watch::Watch<CriticalSectionRawMutex, (), 32> = watch::Watch::new();
 static ALIVE: signal::Signal<CriticalSectionRawMutex, ()> = signal::Signal::new();
 
-const PACKET_SIZE: usize = 256;
-const NUM_PACKETS: usize = 8;
-type Packet = (IpEndpoint, Message);
+static NETWORK_OUT: Channel<CriticalSectionRawMutex, Packet, 16> = Channel::new();
+
+type Packet = (IpEndpoint, Notification, Diagnostics);
 
 bind_interrupts!(struct Irqs {
     USBCTRL_IRQ => InterruptHandler<USB>;
 });
-
-assign_resources! {
-    watchdog: WatchdogResources {
-        watchdog: WATCHDOG,
-    }
-    usb: UsbResources{
-        usb: USB,
-    }
-    digitalOut: DigitalOutResources{
-        pin_25: PIN_25,
-    }
-}
 
 type MyDriver = Driver<'static, peripherals::USB>;
 
@@ -138,7 +117,6 @@ async fn dhcp_task(mut server: DhcpServer<32, 4>, stack: NetStack<'static>) -> !
 #[cortex_m_rt::entry]
 fn main() -> ! {
     let p = embassy_rp::init(Default::default());
-    let r = split_resources!(p);
 
     let _null_endpoint = IpEndpoint::new(
         embassy_net::IpAddress::Ipv4(Ipv4Address::new(0, 0, 0, 0)),
@@ -153,31 +131,12 @@ fn main() -> ! {
         static BUF1: StaticCell<[Packet; NUM_PACKETS]> = StaticCell::new();
         let buf1 = BUF1.init([(meta, [0; PACKET_SIZE]); NUM_PACKETS]);
     */
-    static CHANNEL_0: StaticCell<Channel<CriticalSectionRawMutex, Packet, 16>> = StaticCell::new();
-    let channel0 = CHANNEL_0.init(Channel::new());
-
-    // TODO zerocopy_channel is a single producer / single consumer channel
-    // replace with normal channel and pass messages / commands to core 1
-    // that is, decode and encode on core 0
-
-    static CHANNEL_1: StaticCell<Channel<CriticalSectionRawMutex, Packet, 16>> = StaticCell::new();
-    let channel1 = CHANNEL_1.init(Channel::new());
 
     static CORE1_STACK: StaticCell<Stack<8192>> = StaticCell::new();
     let mut core1_stack = CORE1_STACK.init(Stack::new());
 
     static EXECUTOR0: StaticCell<Executor> = StaticCell::new();
     static EXECUTOR1: StaticCell<Executor> = StaticCell::new();
-
-    let send_to_0_1 = channel0.sender();
-    let send_to_0_2 = channel0.sender();
-    let send_to_0_3 = channel0.sender();
-
-    let recv_fr_0_1 = channel1.receiver();
-
-    let send_to_1_1 = channel1.sender();
-
-    let recv_fr_1_1 = channel0.receiver();
 
     spawn_core1(
         p.CORE1,
@@ -187,13 +146,7 @@ fn main() -> ! {
             executor1.run(|spawner| {
                 spawner.spawn(unwrap!(digital_output_task(
                     STATE_CHANGED.receiver().unwrap(),
-                    send_to_0_3,
-                    r.digitalOut
-                )));
-                spawner.spawn(unwrap!(echo_task(
-                    STATE_CHANGED.receiver().unwrap(),
-                    send_to_0_1,
-                    recv_fr_0_1
+                    [(25, Output::new(p.PIN_25, Level::Low))]
                 )));
             });
         },
@@ -201,7 +154,7 @@ fn main() -> ! {
 
     let executor0 = EXECUTOR0.init(Executor::new());
     executor0.run(|spawner| {
-        let driver = get_usb_driver(r.usb);
+        let driver = get_usb_driver(p.USB);
         let mut builder = get_usb_builder(driver);
         let logger_class = get_logger(&mut builder);
         let (usbrunner, device) = get_usb_network_device(&mut builder);
@@ -219,25 +172,23 @@ fn main() -> ! {
         spawner.spawn(unwrap!(wait_for_network(stack)));
 
         spawner.spawn(unwrap!(watchdog_task(
-            r.watchdog,
+            p.WATCHDOG,
             STATE_CHANGED.receiver().unwrap(),
         )));
         spawner.spawn(unwrap!(udp_input_task(
             stack,
             STATE_CHANGED.receiver().unwrap(),
-            send_to_1_1,
         )));
         spawner.spawn(unwrap!(udp_output_task(
             stack,
             STATE_CHANGED.receiver().unwrap(),
-            recv_fr_1_1
         )));
     });
 }
 
-fn get_usb_driver(usb: UsbResources) -> Driver<'static, USB> {
+fn get_usb_driver(usb: Peri<'static, USB>) -> Driver<'static, USB> {
     // Create the driver, from the HAL.
-    Driver::new(usb.usb, Irqs)
+    Driver::new(usb, Irqs)
 }
 
 fn get_usb_builder(driver: Driver<'static, USB>) -> Builder<'static, Driver<'static, USB>> {
@@ -342,12 +293,12 @@ async fn wait_for_network(stack: NetStack<'static>) {
 
 #[embassy_executor::task]
 async fn watchdog_task(
-    watchdog: WatchdogResources,
+    watchdog: Peri<'static, WATCHDOG>,
     mut watch: watch::Receiver<'static, CriticalSectionRawMutex, (), 32>,
 ) {
     watch.changed().await;
 
-    let mut watchdog = Watchdog::new(watchdog.watchdog);
+    let mut watchdog = Watchdog::new(watchdog);
     watchdog.start(Duration::from_secs(3));
 
     loop {
@@ -361,7 +312,6 @@ async fn watchdog_task(
 async fn udp_input_task(
     stack: NetStack<'static>,
     mut watch: watch::Receiver<'static, CriticalSectionRawMutex, (), 32>,
-    sender: Sender<'static, CriticalSectionRawMutex, Packet, 16>,
 ) {
     watch.changed().await;
 
@@ -394,10 +344,9 @@ async fn udp_input_task(
         }
     }
     log::info!("local local_endpoint {:?}", socket.endpoint());
-    let mut level = DigitalLevel::Off;
 
     loop {
-        let (n, meta) = match socket.recv_from(&mut buf).await {
+        let (n, _meta) = match socket.recv_from(&mut buf).await {
             Ok((0, _)) => {
                 log::info!("read EOF");
                 continue;
@@ -418,43 +367,26 @@ async fn udp_input_task(
         }
 
         log::info!("decoding message");
-        let msg = match from_bytes::<Message>(&buf[..]) {
+        let msg = match from_bytes::<Command>(&buf[..]) {
             Ok(h) => {
                 log::info!("message {:?}", h);
                 h
             }
             Err(x) => {
                 log::info!("invalid message ignored {}", x);
-
-                level = match level {
-                    DigitalLevel::Off => DigitalLevel::On,
-                    DigitalLevel::On => DigitalLevel::Off,
-                };
-                send_to_channel(&DO_CHANNEL, DigitalOutMessages::Set { pin: 25, level }).await;
                 continue;
             }
         };
 
-        match msg.kind {
-            Kind::DigitalOut { pin_25 } => {
-                log::info!("setting pin 25 to {:?}", pin_25);
-                send_to_channel(
-                    &DO_CHANNEL,
-                    DigitalOutMessages::Set {
-                        pin: 25,
-                        level: pin_25,
-                    },
-                )
-                .await;
+        match msg {
+            Command::SetDO { pin, value } => {
+                log::info!("setting pin {} to {}", pin, value);
+                send_to_channel(&DO_CHANNEL, DigitalOutMessages::Set { pin, value }).await;
             }
             _ => {
-                log::info!("ignoring message {:?}", msg.kind);
+                log::info!("ignoring message {:?}", msg);
             }
         }
-
-        log::info!("sending packet to core 1");
-        sender.send((meta.endpoint, msg)).await;
-        log::info!("sent");
     }
 }
 
@@ -462,7 +394,6 @@ async fn udp_input_task(
 async fn udp_output_task(
     stack: NetStack<'static>,
     mut watch: watch::Receiver<'static, CriticalSectionRawMutex, (), 32>,
-    receiver: Receiver<'static, CriticalSectionRawMutex, Packet, 16>,
 ) {
     watch.changed().await;
 
@@ -470,7 +401,6 @@ async fn udp_output_task(
     let mut tx_buffer = [0; 4096];
     let mut rx_meta = [PacketMetadata::EMPTY; 8];
     let mut tx_meta = [PacketMetadata::EMPTY; 8];
-    let mut buf = [0; 4096];
 
     let local_endpoint = IpEndpoint::new(
         embassy_net::IpAddress::Ipv4(Ipv4Address::new(192, 168, 7, 1)),
@@ -496,11 +426,11 @@ async fn udp_output_task(
     log::info!("local local_endpoint {:?}", socket.endpoint());
 
     loop {
-        let (endpoint, msg) = receiver.receive().await;
+        let (endpoint, msg, diag) = NETWORK_OUT.receive().await;
 
         log::info!("recv echo");
         let mut buf = [0_u8; 256];
-        match to_slice(&msg, &mut buf) {
+        match to_slice(&(msg, diag), &mut buf) {
             Ok(x) => {
                 match socket.send_to(x, endpoint).await {
                     Ok(()) => {
@@ -520,7 +450,7 @@ async fn udp_output_task(
 
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq)]
 enum DigitalOutMessages {
-    Set { pin: u8, level: DigitalLevel },
+    Set { pin: u8, value: bool },
 }
 
 static DO_CHANNEL: Channel<CriticalSectionRawMutex, DigitalOutMessages, 16> = Channel::new();
@@ -532,8 +462,7 @@ async fn send_to_channel<T>(channel: &Channel<CriticalSectionRawMutex, T, 16>, v
 #[embassy_executor::task]
 async fn digital_output_task(
     mut watch: watch::Receiver<'static, CriticalSectionRawMutex, (), 32>,
-    sender: Sender<'static, CriticalSectionRawMutex, Packet, 16>,
-    p: DigitalOutResources,
+    p: [(u8, Output<'static>); 1],
 ) {
     watch.changed().await;
 
@@ -542,7 +471,10 @@ async fn digital_output_task(
         12345,
     );
 
-    let mut pin_25 = Output::new(p.pin_25, Level::Low);
+    let mut pins: LinearMap<_, _, 1> = LinearMap::new();
+    for (k, v) in p {
+        pins.insert(k, v).unwrap();
+    }
 
     let mut seconds = Ticker::every(Duration::from_secs(1));
 
@@ -576,60 +508,48 @@ async fn digital_output_task(
                     start_time.as_millis(),
                     end_time.as_millis()
                 );
-                let header = Message {
-                    sender: 123,
-                    time_ms: Instant::now().as_micros(),
-                    exec_ms: diff_time.as_micros(),
-                    jitter_ms: jitter.as_micros(),
-                    period_ms: Duration::from_secs(1).as_micros(),
-                    kind: Kind::DigitalOut {
-                        pin_25: match pin_25.get_output_level() {
-                            Level::Low => DigitalLevel::Off,
-                            Level::High => DigitalLevel::On,
-                        },
-                    },
+                let pins: Vec<_, 1> = pins
+                    .iter()
+                    .map(|(n, pin)| {
+                        (
+                            *n,
+                            match pin.get_output_level() {
+                                Level::Low => false,
+                                Level::High => true,
+                            },
+                        )
+                    })
+                    .collect();
+                let pins = *pins.as_array().unwrap();
+                let header = Notification::DO { pins };
+                let diagnostics = Diagnostics {
+                    timestamp_us: Instant::now().as_micros(),
+                    execution_us: diff_time.as_micros(),
+                    jitter_in_us: jitter.as_micros(),
+                    period_in_us: Duration::from_secs(1).as_micros(),
                 };
+
                 log::info!("digital out 5");
-                sender.send((remote_endpoint, header)).await;
+                NETWORK_OUT
+                    .send((remote_endpoint, header, diagnostics))
+                    .await;
                 log::info!("digital out 6");
             }
-            Some(DigitalOutMessages::Set { pin: 25, level }) => {
+            Some(DigitalOutMessages::Set { pin, value }) => {
                 log::info!("digital out 1");
-                pin_25.set_level(match level {
-                    DigitalLevel::Off => Level::Low,
-                    DigitalLevel::On => Level::High,
-                });
-                log::info!("digital out 2");
-            }
-            Some(_) => {
+                match pins.get_mut(&pin) {
+                    None => log::info!("unknown pin {}", 25),
+                    Some(pin) => {
+                        pin.set_level(match value {
+                            false => Level::Low,
+                            true => Level::High,
+                        });
+                    }
+                }
                 log::info!("digital out 2");
             }
         }
 
         ALIVE.signal(());
-    }
-}
-
-#[embassy_executor::task]
-async fn echo_task(
-    mut watch: watch::Receiver<'static, CriticalSectionRawMutex, (), 32>,
-    sender: Sender<'static, CriticalSectionRawMutex, Packet, 16>,
-    receiver: Receiver<'static, CriticalSectionRawMutex, Packet, 16>,
-) {
-    watch.changed().await;
-    loop {
-        let (meta0, msg) = receiver.receive().await;
-        log::info!("echo0");
-        let header = Message {
-            sender: 123,
-            time_ms: Instant::now().as_millis(),
-            exec_ms: Duration::from_secs(0).as_millis(),
-            jitter_ms: Duration::from_secs(0).as_millis(),
-            period_ms: Duration::from_secs(0).as_millis(),
-            kind: msg.kind,
-        };
-        log::info!("echo1");
-        sender.send((meta0, header)).await;
-        log::info!("echo2");
     }
 }
