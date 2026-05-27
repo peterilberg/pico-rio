@@ -2,29 +2,27 @@ use embassy_rp::Peri;
 use embassy_rp::peripherals::WATCHDOG;
 use embassy_rp::watchdog::Watchdog;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-use embassy_sync::signal;
+use embassy_sync::signal::Signal;
 use embassy_time::Duration;
+use {defmt_rtt as _, panic_probe as _};
 
 use crate::network;
 
-use {defmt_rtt as _, panic_probe as _};
-
-static ALIVE: signal::Signal<CriticalSectionRawMutex, ()> = signal::Signal::new();
+static NOTIFICATION: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 
 #[embassy_executor::task]
-pub async fn watchdog_task(watchdog: Peri<'static, WATCHDOG>) {
+pub async fn task(watchdog: Peri<'static, WATCHDOG>, timeout: Duration) {
     network::wait_for_network().await;
 
     let mut watchdog = Watchdog::new(watchdog);
-    watchdog.start(Duration::from_secs(3));
+    watchdog.start(timeout);
 
     loop {
-        ALIVE.wait().await;
-        log::info!("still alive");
-        watchdog.feed(Duration::from_secs(3));
+        NOTIFICATION.wait().await;
+        watchdog.feed(timeout);
     }
 }
 
-pub fn feed() {
-    ALIVE.signal(());
+pub fn notify() {
+    NOTIFICATION.signal(());
 }
