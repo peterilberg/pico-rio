@@ -1,16 +1,14 @@
 use embassy_net::udp::{PacketMetadata, UdpSocket};
-use embassy_net::{Config, Ipv4Address, Ipv4Cidr, Runner, Stack, StackResources, StaticConfigV4};
+use embassy_net::{Config, ConfigV4, Runner, Stack, StackResources, StaticConfigV4};
+use embassy_net::{IpAddress, IpEndpoint, Ipv4Address, Ipv4Cidr};
 use embassy_rp::clocks::RoscRng;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::watch::Watch;
 use heapless::Vec;
+use leasehund::{DHCPServerBuffers, DHCPServerSocket, TransactionEvent};
+use leasehund::{DhcpConfig, DhcpConfigBuilder, DhcpServer};
 use static_cell::StaticCell;
 use {defmt_rtt as _, panic_probe as _};
-
-use leasehund::{
-    DHCPServerBuffers, DHCPServerSocket, DhcpConfig, DhcpConfigBuilder, DhcpServer,
-    TransactionEvent,
-};
 
 use crate::usb::NetworkCard;
 
@@ -79,15 +77,31 @@ impl NetworkStack {
         DhcpServer::with_config(config)
     }
 
-    pub fn udp_socket<'socket>(&self, buffers: &'socket mut SocketBuffers) -> UdpSocket<'socket> {
+    pub fn new_udp_socket<'socket>(
+        &self,
+        port: u16,
+        buffers: &'socket mut SocketBuffers,
+    ) -> UdpSocket<'socket> {
         let NetworkStack(stack) = self;
+
         let SocketBuffers {
             rx_buffer,
             tx_buffer,
             rx_meta,
             tx_meta,
         } = buffers;
-        UdpSocket::new(*stack, rx_meta, rx_buffer, tx_meta, tx_buffer)
+        let mut socket = UdpSocket::new(*stack, rx_meta, rx_buffer, tx_meta, tx_buffer);
+
+        match stack.config_v4() {
+            None => {}
+            Some(config) => {
+                let address = IpAddress::Ipv4(config.address.address());
+                let endpoint = IpEndpoint::new(address, port);
+                let _ = socket.bind(endpoint);
+            }
+        }
+
+        socket
     }
 }
 
@@ -117,22 +131,21 @@ pub async fn dhcp_task(mut server: DhcpServer<32, 4>, stack: NetworkStack) -> ! 
     let mut socket = DHCPServerSocket::new(stack, &mut buffers);
 
     loop {
-        match server.lease_one(&mut socket).await {
-            Ok(TransactionEvent::Leased(ip, _)) => {
-                match stack.config_v4() {
-                    None => {}
-                    Some(config) => {
-                        let updated_gateway = StaticConfigV4 {
-                            gateway: Some(ip),
-                            ..config
-                        };
-                        stack.set_config_v4(embassy_net::ConfigV4::Static(updated_gateway));
-                    }
-                }
+        let Ok(event) = server.lease_one(&mut socket).await else {
+            continue; // Lease failed
+        };
+
+        match event {
+            TransactionEvent::Leased(ip, _) => {
+                let _ = stack.config_v4().map(|config| {
+                    stack.set_config_v4(ConfigV4::Static(StaticConfigV4 {
+                        gateway: Some(ip),
+                        ..config
+                    }));
+                });
                 stack.wait_config_up().await;
             }
-            Ok(TransactionEvent::Released(_, _)) => {}
-            Err(_) => { /* Lease failed */ }
+            TransactionEvent::Released(_, _) => {}
         }
     }
 }

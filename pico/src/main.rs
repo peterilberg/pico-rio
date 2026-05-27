@@ -12,36 +12,25 @@ use embassy_executor::Executor;
 use embassy_net::{IpEndpoint, Ipv4Address, Ipv4Cidr};
 use embassy_rp::gpio::{Level, Output};
 use embassy_rp::multicore::{Stack, spawn_core1};
-use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 
 use embassy_time::Duration;
 use heapless::Vec;
-use messages::{Diagnostics, Notification};
 use static_cell::StaticCell;
 use {defmt_rtt as _, panic_probe as _};
 
-use embassy_sync::channel::Channel;
-
-mod command;
-mod network;
-mod notification;
-mod usb;
-mod watchdog;
+use crate::mailbox::Mailbox;
 
 mod digital_out;
-
-type Packet = (IpEndpoint, Notification, Diagnostics);
-
-type Mailbox<T> = Channel<CriticalSectionRawMutex, T, 16>;
+mod inbound;
+mod mailbox;
+mod network;
+mod outbound;
+mod usb;
+mod watchdog;
 
 #[cortex_m_rt::entry]
 fn main() -> ! {
     let p = embassy_rp::init(Default::default());
-
-    let _null_endpoint = IpEndpoint::new(
-        embassy_net::IpAddress::Ipv4(Ipv4Address::new(0, 0, 0, 0)),
-        0,
-    );
 
     static CORE1_STACK: StaticCell<Stack<8192>> = StaticCell::new();
     let mut core1_stack = CORE1_STACK.init(Stack::new());
@@ -54,10 +43,9 @@ fn main() -> ! {
     let do_receiver = DIGITAL_OUT_MAILBOX.receiver();
     let do_sender = DIGITAL_OUT_MAILBOX.sender();
 
-    static NETWORK_MAILBOX: Mailbox<(IpEndpoint, messages::Notification, messages::Diagnostics)> =
-        Mailbox::<(IpEndpoint, messages::Notification, messages::Diagnostics)>::new();
-    let net_receiver = NETWORK_MAILBOX.receiver();
-    let net_sender = NETWORK_MAILBOX.sender();
+    static NETWORK_MAILBOX: Mailbox<outbound::Message> = Mailbox::<outbound::Message>::new();
+    let inbound = NETWORK_MAILBOX.receiver();
+    let outbound = NETWORK_MAILBOX.sender();
 
     spawn_core1(
         p.CORE1,
@@ -69,7 +57,7 @@ fn main() -> ! {
                     100,
                     [(25, Output::new(p.PIN_25, Level::Low))],
                     do_receiver,
-                    net_sender,
+                    outbound,
                 )));
             });
         },
@@ -89,6 +77,11 @@ fn main() -> ! {
         let (network, network_stack) = network::new_network(network_card, config);
         let dhcp_server = network_stack.add_dhcp_server();
 
+        let default_endpoint = IpEndpoint::new(
+            embassy_net::IpAddress::Ipv4(Ipv4Address::new(192, 168, 64, 47)),
+            12345,
+        );
+
         spawner.spawn(unwrap!(usb::usb_task(usb_device)));
         spawner.spawn(unwrap!(usb::ethernet_task(ethernet)));
         spawner.spawn(unwrap!(usb::logging_task(logging)));
@@ -98,10 +91,12 @@ fn main() -> ! {
         spawner.spawn(unwrap!(network::notify_when_available(network_stack)));
 
         spawner.spawn(unwrap!(watchdog::task(p.WATCHDOG, Duration::from_secs(3))));
-        spawner.spawn(unwrap!(command::udp_input_task(network_stack, do_sender)));
-        spawner.spawn(unwrap!(notification::udp_output_task(
+        spawner.spawn(unwrap!(inbound::task(network_stack, 1234, do_sender)));
+
+        spawner.spawn(unwrap!(outbound::task(
             network_stack,
-            net_receiver
+            default_endpoint,
+            inbound
         )));
     });
 }

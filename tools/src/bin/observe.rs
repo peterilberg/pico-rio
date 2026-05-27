@@ -1,4 +1,4 @@
-use messages::{Diagnostics, Notification};
+use messages::{Content, Info};
 use postcard::from_bytes;
 use tokio::net::UdpSocket;
 
@@ -9,18 +9,21 @@ async fn main() {
     let mut buffer = [0_u8; 1024];
     loop {
         let (_len, addr) = socket.recv_from(&mut buffer).await.unwrap();
-        match from_bytes::<(Notification, Diagnostics)>(&buffer) {
-            Ok((n, diag)) => {
+        match from_bytes::<Info>(&buffer) {
+            Ok(Info {
+                content,
+                diagnostics,
+            }) => {
                 println!(
                     "{} @ {} ms with period {} ms took {} ms jitter {} ms",
                     addr,
-                    diag.timestamp_us,
-                    diag.period_in_us,
-                    diag.execution_us,
-                    diag.jitter_in_us
+                    diagnostics.timestamp_us,
+                    diagnostics.period_in_us,
+                    diagnostics.execution_us,
+                    diagnostics.jitter_in_us
                 );
-                match n {
-                    Notification::DO {
+                match content {
+                    Content::DO {
                         pins: [(pin, level)],
                     } => {
                         println!(

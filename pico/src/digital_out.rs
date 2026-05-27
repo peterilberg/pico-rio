@@ -1,20 +1,17 @@
 use embassy_futures::select::{Either, select};
-use embassy_net::{IpEndpoint, Ipv4Address};
 use embassy_rp::gpio::{Level, Output};
-use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-use embassy_time::Duration;
-use embassy_time::Instant;
-use embassy_time::Ticker;
+use embassy_time::{Duration, Instant, Ticker};
 
-use crate::network;
-use crate::watchdog;
 use heapless::{LinearMap, Vec};
-use messages::{Diagnostics, Notification};
+use messages::{Content, Diagnostics};
 use serde::{Deserialize, Serialize};
 
 use {defmt_rtt as _, panic_probe as _};
 
-use embassy_sync::channel::{Receiver, Sender};
+use crate::mailbox::{Inbox, Outbox};
+use crate::network;
+use crate::outbound;
+use crate::watchdog;
 
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq)]
 pub enum Message {
@@ -25,27 +22,17 @@ pub enum Message {
 pub async fn task(
     interval_ms: u32,
     pins2: [(u8, Output<'static>); 1],
-    receiver: Receiver<'static, CriticalSectionRawMutex, Message, 16>,
-    net_out: Sender<
-        'static,
-        CriticalSectionRawMutex,
-        (IpEndpoint, messages::Notification, messages::Diagnostics),
-        16,
-    >,
+    inbox: Inbox<Message>,
+    outbound: Outbox<outbound::Message>,
 ) {
     network::wait_for_network().await;
-
-    let remote_endpoint = IpEndpoint::new(
-        embassy_net::IpAddress::Ipv4(Ipv4Address::new(192, 168, 64, 47)),
-        12345,
-    );
 
     let mut pins: LinearMap<_, _, 1> = LinearMap::new();
     for (k, v) in pins2 {
         pins.insert(k, v).unwrap();
     }
 
-    let mut foo = Foo::new(Duration::from_millis(interval_ms.into()), receiver);
+    let mut foo = Foo::new(Duration::from_millis(interval_ms.into()), inbox);
 
     loop {
         log::info!("digital out 0");
@@ -69,11 +56,13 @@ pub async fn task(
                     })
                     .collect();
                 let pins = *pins.as_array().unwrap();
-                let header = Notification::DO { pins };
-                let diagnostics = Diagnostics { ..foo.diag };
+                let info = outbound::Message {
+                    content: Content::DO { pins },
+                    diagnostics: Diagnostics { ..foo.diag },
+                };
 
                 log::info!("digital out 5");
-                net_out.send((remote_endpoint, header, diagnostics)).await;
+                outbound.send(info).await;
                 log::info!("digital out 6");
             }
             Some(Message::Set { pin, value }) => {
@@ -95,7 +84,7 @@ pub async fn task(
     }
 }
 
-async fn loop_check<'t, T>(foo: &mut Foo<'t, T>) -> Option<T> {
+async fn loop_check<T: 'static>(foo: &mut Foo<T>) -> Option<T> {
     foo.update();
 
     let msg = match select(foo.seconds.next(), foo.receiver.receive()).await {
@@ -107,18 +96,15 @@ async fn loop_check<'t, T>(foo: &mut Foo<'t, T>) -> Option<T> {
     msg
 }
 
-struct Foo<'t, T> {
+struct Foo<T: 'static> {
     seconds: Ticker,
-    receiver: Receiver<'t, CriticalSectionRawMutex, T, 16>,
+    receiver: Inbox<T>,
     start_time: Instant,
     diag: Diagnostics,
 }
 
-impl<'t, T> Foo<'t, T> {
-    fn new(
-        duration: Duration,
-        receiver: Receiver<'static, CriticalSectionRawMutex, T, 16>,
-    ) -> Self {
+impl<T> Foo<T> {
+    fn new(duration: Duration, receiver: Inbox<T>) -> Self {
         let seconds = Ticker::every(Duration::from_secs(1));
         Foo {
             seconds,

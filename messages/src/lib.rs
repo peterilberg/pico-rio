@@ -14,7 +14,13 @@ pub enum Command {
 }
 
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq)]
-pub enum Notification {
+pub struct Info {
+    pub content: Content,
+    pub diagnostics: Diagnostics,
+}
+
+#[derive(Serialize, Deserialize, Debug, Eq, PartialEq)]
+pub enum Content {
     Pong,
 
     DO { pins: [(u8, bool); 1] },
