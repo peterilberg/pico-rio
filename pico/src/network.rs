@@ -1,134 +1,152 @@
-use embassy_net::{
-    Ipv4Address, Runner as NetRunner, Stack as NetStack, StackResources, StaticConfigV4,
-};
+use embassy_net::udp::{PacketMetadata, UdpSocket};
+use embassy_net::{Config, Ipv4Address, Ipv4Cidr, Runner, Stack, StackResources, StaticConfigV4};
 use embassy_rp::clocks::RoscRng;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-use embassy_sync::watch;
-use embassy_usb::class::cdc_ncm::embassy_net::Device;
-
-use leasehund::{
-    DHCPServerBuffers, DHCPServerSocket, DhcpConfig as LeaseConfig, DhcpConfigBuilder, DhcpServer,
-    TransactionEvent,
-};
+use embassy_sync::watch::Watch;
+use heapless::Vec;
 use static_cell::StaticCell;
 use {defmt_rtt as _, panic_probe as _};
 
-use embassy_sync::channel::Channel;
+use leasehund::{
+    DHCPServerBuffers, DHCPServerSocket, DhcpConfig, DhcpConfigBuilder, DhcpServer,
+    TransactionEvent,
+};
 
-static STATE_CHANGED: watch::Watch<CriticalSectionRawMutex, (), 32> = watch::Watch::new();
+use crate::usb::NetworkCard;
 
-const MTU: usize = 1514;
+const NUM_SOCKETS: usize = 32;
+static NETWORK_READY: Watch<CriticalSectionRawMutex, (), NUM_SOCKETS> = Watch::new();
 
-impl NDrive {
-    pub async fn run(mut self) -> ! {
-        self.0.run().await
+#[derive(Clone, Copy)]
+pub struct NetworkStack(Stack<'static>);
+pub type Network = Runner<'static, NetworkCard>;
+
+pub fn new_network(
+    network_card: NetworkCard,
+    configuration: StaticConfigV4,
+) -> (Network, NetworkStack) {
+    let config = Config::ipv4_static(configuration);
+
+    let mut rng = RoscRng;
+    let random_seed = rng.next_u64();
+
+    static RESOURCES: StaticCell<StackResources<NUM_SOCKETS>> = StaticCell::new();
+    let resources = RESOURCES.init(StackResources::new());
+    let (stack, driver) = embassy_net::new(network_card, config, resources, random_seed);
+    (driver, NetworkStack(stack))
+}
+
+#[embassy_executor::task]
+pub async fn network_task(mut task: Network) -> ! {
+    task.run().await
+}
+
+impl NetworkStack {
+    pub fn add_dhcp_server(&self) -> DhcpServer<32, 4> {
+        let NetworkStack(stack) = self;
+
+        let default_ip = Ipv4Address::new(0, 0, 0, 0);
+        let default_config = StaticConfigV4 {
+            address: Ipv4Cidr::new(default_ip, 24),
+            dns_servers: Vec::new(),
+            gateway: Some(default_ip),
+        };
+        let config_v4 = stack.config_v4().unwrap_or(default_config);
+
+        let ip = config_v4.address.address();
+        let mask = config_v4.address.netmask();
+        let router = config_v4.gateway.unwrap_or(default_ip);
+
+        let cloudflare_dns = Ipv4Address::new(1, 1, 1, 1);
+        let backup_dns = Ipv4Address::new(1, 0, 0, 1);
+        let google_dns = Ipv4Address::new(8, 8, 8, 8);
+
+        let [a, b, c, _] = config_v4.address.address().octets();
+        let start = Ipv4Address::new(a, b, c, 100);
+        let end = Ipv4Address::new(a, b, c, 200);
+
+        let config: DhcpConfig<4> = DhcpConfigBuilder::new()
+            .server_ip(ip)
+            .subnet_mask(mask)
+            .router(router)
+            .add_dns_server(cloudflare_dns)
+            .add_dns_server(backup_dns)
+            .add_dns_server(google_dns)
+            .ip_pool(start, end)
+            .lease_time(7200) // 2 hours
+            .build();
+
+        DhcpServer::with_config(config)
+    }
+
+    pub fn udp_socket<'socket>(&self, buffers: &'socket mut SocketBuffers) -> UdpSocket<'socket> {
+        let NetworkStack(stack) = self;
+        let SocketBuffers {
+            rx_buffer,
+            tx_buffer,
+            rx_meta,
+            tx_meta,
+        } = buffers;
+        UdpSocket::new(*stack, rx_meta, rx_buffer, tx_meta, tx_buffer)
     }
 }
 
-impl Dhcp {
-    pub async fn run(self) -> ! {
-        let Dhcp(mut server, NStack(stack)) = self;
-        let mut buffers = DHCPServerBuffers::new();
-        let mut socket = DHCPServerSocket::new(stack, &mut buffers);
-        loop {
-            let Ok(event) = server.lease_one(&mut socket).await else {
-                // Handle error (e.g., log it)
-                log::info!("Lease failed.");
-                continue;
-            };
+pub struct SocketBuffers {
+    rx_buffer: [u8; 4096],
+    tx_buffer: [u8; 4096],
+    rx_meta: [PacketMetadata; 8],
+    tx_meta: [PacketMetadata; 8],
+}
 
-            match event {
-                TransactionEvent::Leased(ip, mac) => {
-                    log::info!("Leased IP: {} to MAC: {:02x?}", ip, mac);
-                    let config = stack.config_v4().unwrap();
-                    stack.set_config_v4(embassy_net::ConfigV4::Static(StaticConfigV4 {
-                        gateway: Some(ip),
-                        ..config
-                    }));
-                    stack.wait_config_up().await;
-                    log::info!("Replace gateway");
-                }
-                TransactionEvent::Released(ip, mac) => {
-                    log::info!("Released IP: {} from MAC: {:02x?}", ip, mac);
-                }
-            }
+impl Default for SocketBuffers {
+    fn default() -> Self {
+        SocketBuffers {
+            rx_buffer: [0; 4096],
+            tx_buffer: [0; 4096],
+            rx_meta: [PacketMetadata::EMPTY; 8],
+            tx_meta: [PacketMetadata::EMPTY; 8],
         }
     }
 }
 
-type Mailbox<T> = Channel<CriticalSectionRawMutex, T, 16>;
+#[embassy_executor::task]
+pub async fn dhcp_task(mut server: DhcpServer<32, 4>, stack: NetworkStack) -> ! {
+    let NetworkStack(stack) = stack;
 
-pub struct NStack(pub NetStack<'static>);
-pub struct NDrive(NetRunner<'static, Device<'static, MTU>>);
+    let mut buffers = DHCPServerBuffers::new();
+    let mut socket = DHCPServerSocket::new(stack, &mut buffers);
 
-pub fn new_network_stack(
-    network_card: Device<'static, MTU>,
-    configuration: embassy_net::StaticConfigV4,
-) -> (NStack, NDrive) {
-    let config = embassy_net::Config::ipv4_static(configuration);
-
-    // Generate random seed
-    let mut rng = RoscRng;
-    let seed = rng.next_u64();
-
-    // Init network stack
-    static RESOURCES: StaticCell<StackResources<10>> = StaticCell::new();
-    let (s, r) = embassy_net::new(
-        network_card,
-        config,
-        RESOURCES.init(StackResources::new()),
-        seed,
-    );
-    (NStack(s), NDrive(r))
-}
-
-pub struct Dhcp(DhcpServer<32, 4>, NStack);
-
-impl NStack {
-    pub fn add_dhcp_server(&self) -> Dhcp {
-        let v4 = self.0.config_v4().unwrap();
-        let [a, b, c, _] = v4.address.address().octets();
-
-        let config: LeaseConfig<4> = DhcpConfigBuilder::new()
-            .server_ip(v4.address.address())
-            .subnet_mask(v4.address.netmask())
-            .router(v4.gateway.unwrap())
-            .add_dns_server(Ipv4Address::new(1, 1, 1, 1)) // Cloudflare DNS
-            .add_dns_server(Ipv4Address::new(1, 0, 0, 1)) // Cloudflare backup
-            .add_dns_server(Ipv4Address::new(8, 8, 8, 8)) // Google DNS
-            .ip_pool(
-                Ipv4Address::new(a, b, c, 100),
-                Ipv4Address::new(a, b, c, 200),
-            )
-            .lease_time(7200) // 2 hours
-            .build();
-
-        Dhcp(DhcpServer::with_config(config), NStack(self.0))
+    loop {
+        match server.lease_one(&mut socket).await {
+            Ok(TransactionEvent::Leased(ip, _)) => {
+                match stack.config_v4() {
+                    None => {}
+                    Some(config) => {
+                        let updated_gateway = StaticConfigV4 {
+                            gateway: Some(ip),
+                            ..config
+                        };
+                        stack.set_config_v4(embassy_net::ConfigV4::Static(updated_gateway));
+                    }
+                }
+                stack.wait_config_up().await;
+            }
+            Ok(TransactionEvent::Released(_, _)) => {}
+            Err(_) => { /* Lease failed */ }
+        }
     }
 }
 
 #[embassy_executor::task]
-pub async fn notify_when_network_is_available(stack: NStack) {
-    log::info!("waiting for config up");
-    stack.0.wait_config_up().await;
-
-    // And now we can use it!
-    STATE_CHANGED.sender().send(());
+pub async fn notify_when_available(stack: NetworkStack) {
+    let NetworkStack(stack) = stack;
+    stack.wait_config_up().await;
+    NETWORK_READY.sender().send(());
 }
 
 pub async fn wait_for_network() {
-    match STATE_CHANGED.receiver() {
+    match NETWORK_READY.receiver() {
         None => {}
-        Some(mut watch) => watch.changed().await,
+        Some(mut network) => network.changed().await,
     }
-}
-
-#[embassy_executor::task]
-pub async fn net_task(task: NDrive) -> ! {
-    task.run().await
-}
-
-#[embassy_executor::task]
-pub async fn dhcp_task(task: Dhcp) -> ! {
-    task.run().await;
 }
