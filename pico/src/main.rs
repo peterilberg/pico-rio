@@ -14,6 +14,7 @@ use embassy_rp::gpio::{Level, Output};
 use embassy_rp::multicore::{Stack, spawn_core1};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 
+use embassy_time::Duration;
 use heapless::Vec;
 use messages::{Diagnostics, Notification};
 use static_cell::StaticCell;
@@ -76,33 +77,31 @@ fn main() -> ! {
 
     let executor0 = EXECUTOR0.init(Executor::new());
     executor0.run(|spawner| {
-        let mut usb = usb::get_device(p.USB);
-        let logging = usb.add_logging();
-        let (ethernet, network_card) = usb.add_ethernet();
+        let mut usb_device = usb::get_device(p.USB);
+        let logging = usb_device.add_logging();
+        let (ethernet, network_card) = usb_device.add_ethernet();
 
         let config = embassy_net::StaticConfigV4 {
             address: Ipv4Cidr::new(Ipv4Address::new(192, 168, 7, 1), 24),
             dns_servers: Vec::new(),
             gateway: Some(Ipv4Address::new(192, 168, 7, 2)),
         };
-        let (stack, runner) = network::new_network_stack(network_card, config);
-        let dhcp_server = stack.add_dhcp_server();
+        let (network, network_stack) = network::new_network(network_card, config);
+        let dhcp_server = network_stack.add_dhcp_server();
 
-        spawner.spawn(unwrap!(usb::usb_task(usb)));
+        spawner.spawn(unwrap!(usb::usb_task(usb_device)));
         spawner.spawn(unwrap!(usb::ethernet_task(ethernet)));
         spawner.spawn(unwrap!(usb::logging_task(logging)));
 
-        spawner.spawn(unwrap!(network::dhcp_task(dhcp_server)));
-        spawner.spawn(unwrap!(network::net_task(runner)));
-        spawner.spawn(unwrap!(network::notify_when_network_is_available(
-            network::NStack(stack.0)
-        )));
+        spawner.spawn(unwrap!(network::dhcp_task(dhcp_server, network_stack)));
+        spawner.spawn(unwrap!(network::network_task(network)));
+        spawner.spawn(unwrap!(network::notify_when_available(network_stack)));
 
-        spawner.spawn(unwrap!(watchdog::watchdog_task(p.WATCHDOG,)));
-        spawner.spawn(unwrap!(command::udp_input_task(
-            network::NStack(stack.0),
-            do_sender
+        spawner.spawn(unwrap!(watchdog::task(p.WATCHDOG, Duration::from_secs(3))));
+        spawner.spawn(unwrap!(command::udp_input_task(network_stack, do_sender)));
+        spawner.spawn(unwrap!(notification::udp_output_task(
+            network_stack,
+            net_receiver
         )));
-        spawner.spawn(unwrap!(notification::udp_output_task(stack, net_receiver)));
     });
 }

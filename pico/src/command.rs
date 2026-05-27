@@ -1,43 +1,31 @@
-use embassy_net::udp::{PacketMetadata, UdpSocket};
 use embassy_net::{IpEndpoint, Ipv4Address};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-
-use crate::digital_out;
+use embassy_sync::channel::{Channel, Sender};
 
 use messages::Command;
 use postcard::from_bytes;
+use static_cell::StaticCell;
 use {defmt_rtt as _, panic_probe as _};
 
-use embassy_sync::channel::{Channel, Sender};
-
-use crate::network;
+use crate::digital_out;
+use crate::network::{self, SocketBuffers};
 
 type Mailbox<T> = Channel<CriticalSectionRawMutex, T, 16>;
 
 #[embassy_executor::task]
 pub async fn udp_input_task(
-    stack: network::NStack,
+    stack: network::NetworkStack,
     digital_out: Sender<'static, CriticalSectionRawMutex, digital_out::Message, 16>,
 ) {
     network::wait_for_network().await;
 
-    let mut rx_buffer = [0; 4096];
-    let mut tx_buffer = [0; 4096];
-    let mut rx_meta = [PacketMetadata::EMPTY; 8];
-    let mut tx_meta = [PacketMetadata::EMPTY; 8];
-    let mut buf = [0; 4096];
+    static BUFFERS: StaticCell<network::SocketBuffers> = StaticCell::new();
+    let buffers = BUFFERS.init(SocketBuffers::default());
+    let mut socket = stack.udp_socket(buffers);
 
     let local_endpoint = IpEndpoint::new(
         embassy_net::IpAddress::Ipv4(Ipv4Address::new(192, 168, 7, 1)),
         1234,
-    );
-
-    let mut socket = UdpSocket::new(
-        stack.0,
-        &mut rx_meta,
-        &mut rx_buffer,
-        &mut tx_meta,
-        &mut tx_buffer,
     );
 
     log::info!("Listening on UDP:1234...");
@@ -50,6 +38,8 @@ pub async fn udp_input_task(
         }
     }
     log::info!("local local_endpoint {:?}", socket.endpoint());
+
+    let mut buf = [0; 4096];
 
     loop {
         let (n, _meta) = match socket.recv_from(&mut buf).await {

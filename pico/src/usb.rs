@@ -3,7 +3,7 @@ use embassy_rp::bind_interrupts;
 use embassy_rp::peripherals::USB;
 use embassy_rp::usb::{Driver, InterruptHandler};
 use embassy_usb::class::cdc_acm::{CdcAcmClass, State as AcmState};
-use embassy_usb::class::cdc_ncm::embassy_net::{Device as NetDevice, Runner, State as NetState};
+use embassy_usb::class::cdc_ncm::embassy_net::{Device, Runner, State};
 use embassy_usb::class::cdc_ncm::{CdcNcmClass, State as NcmState};
 use embassy_usb::{Builder, Config};
 
@@ -20,7 +20,7 @@ pub struct Usb(Builder<'static, Driver<'static, USB>>);
 pub struct Logging(CdcAcmClass<'static, Driver<'static, USB>>);
 pub struct Ethernet(Runner<'static, Driver<'static, USB>, MTU>);
 
-pub type NetworkCard = NetDevice<'static, MTU>;
+pub type NetworkCard = Device<'static, MTU>;
 
 pub fn get_device(usb: Peri<'static, USB>) -> Usb {
     let driver = Driver::new(usb, Irqs);
@@ -67,9 +67,9 @@ impl Usb {
         static STATE: StaticCell<NcmState> = StaticCell::new();
         let class = CdcNcmClass::new(&mut self.0, STATE.init(NcmState::new()), host_mac_addr, 64);
 
-        static NET_STATE: StaticCell<NetState<MTU, 4, 4>> = StaticCell::new();
-        let (usbrunner, device) = class
-            .into_embassy_net_device::<MTU, 4, 4>(NET_STATE.init(NetState::new()), our_mac_addr);
+        static NET_STATE: StaticCell<State<MTU, 4, 4>> = StaticCell::new();
+        let (usbrunner, device) =
+            class.into_embassy_net_device::<MTU, 4, 4>(NET_STATE.init(State::new()), our_mac_addr);
         (Ethernet(usbrunner), device)
     }
 

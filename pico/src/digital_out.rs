@@ -91,7 +91,7 @@ pub async fn task(
             }
         }
 
-        watchdog::feed();
+        watchdog::notify();
     }
 }
 
