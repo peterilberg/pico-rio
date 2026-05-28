@@ -36,7 +36,7 @@ pub async fn task(
                 set_do(digital_out, pin, value).await;
             }
             command => {
-                log::info!("invound: ignored command {:?}", command);
+                log::info!("inbound: ignored command {:?}", command);
             }
         }
     }
