@@ -12,6 +12,7 @@ use embassy_rp::{
 };
 use embassy_time::Duration;
 use heapless::Vec;
+use messages::NUM_PINS_DO;
 use static_cell::StaticCell;
 use {defmt_rtt as _, panic_probe as _};
 
@@ -97,7 +98,7 @@ fn core0_task(
     )));
 }
 
-fn core1_task(spawner: Spawner, pins_do: [(u8, Output<'static>); 1]) {
+fn core1_task(spawner: Spawner, pins_do: [(u8, Output<'static>); NUM_PINS_DO]) {
     spawner.spawn(unwrap!(digital_out::task(
         Duration::from_millis(100),
         pins_do,

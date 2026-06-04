@@ -1,7 +1,7 @@
 use embassy_futures::select::{Either, select};
 use embassy_rp::gpio::{Level, Output};
 use embassy_time::Duration;
-use messages::Content;
+use messages::{Content, NUM_PINS_DO};
 use serde::{Deserialize, Serialize};
 use {defmt_rtt as _, panic_probe as _};
 
@@ -19,7 +19,7 @@ pub enum Message {
 #[embassy_executor::task]
 pub async fn task(
     interval: Duration,
-    pins: [(u8, Output<'static>); 1],
+    pins: [(u8, Output<'static>); NUM_PINS_DO],
     inbox: Inbox<Message>,
     outbound: Outbox<outbound::Message>,
 ) {
@@ -42,13 +42,13 @@ pub async fn task(
 }
 
 async fn send_pin_levels(
-    pins: &[(u8, Output<'static>); 1],
+    pins: &[(u8, Output<'static>); NUM_PINS_DO],
     outbound: Outbox<outbound::Message>,
     timer: &mut Timer,
 ) {
     timer.start();
 
-    let mut state = [(0_u8, false); 1];
+    let mut state = [(0_u8, false); NUM_PINS_DO];
     for (i, (pin, output)) in pins.iter().enumerate() {
         state[i].0 = *pin;
         state[i].1 = match output.get_output_level() {
@@ -65,7 +65,7 @@ async fn send_pin_levels(
         .await;
 }
 
-fn set_pin(pin: u8, value: bool, pins: &mut [(u8, Output<'static>); 1]) {
+fn set_pin(pin: u8, value: bool, pins: &mut [(u8, Output<'static>); NUM_PINS_DO]) {
     match pins.iter_mut().find(|(known_pin, _)| pin == *known_pin) {
         None => log::info!("digital_out: ignore unknown pin {}", pin),
         Some((_, output)) => {

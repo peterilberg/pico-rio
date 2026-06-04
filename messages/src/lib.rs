@@ -19,11 +19,13 @@ pub struct Info {
     pub diagnostics: Diagnostics,
 }
 
+pub const NUM_PINS_DO: usize = 1;
+
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq)]
 pub enum Content {
     Pong,
 
-    DO { pins: [(u8, bool); 1] },
+    DO { pins: [(u8, bool); NUM_PINS_DO] },
 }
 
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq)]
