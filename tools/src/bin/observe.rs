@@ -1,9 +1,10 @@
-use messages::{Content, Diagnostics, Info, NUM_PINS_DO};
+use messages::{Content, Diagnostics, Info};
 use postcard::from_bytes;
 use std::env::Args;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4};
-use std::time::Duration;
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use tokio::net::UdpSocket;
+
+use tools::logger::Logger;
 
 #[tokio::main]
 async fn main() {
@@ -28,7 +29,7 @@ async fn main() {
                 diagnostics,
             }) => dispatch(sender, diagnostics, content),
             Err(error) => {
-                Sender::error(sender);
+                Logger::error(sender);
                 println!("invalid message: {}", error);
             }
         }
@@ -71,60 +72,12 @@ impl Config {
 fn dispatch(sender: SocketAddr, diagnostics: Diagnostics, content: Content) {
     match content {
         Content::Pong => {
-            Sender::error(sender);
+            Logger::error(sender);
             println!("unexpected pong");
         }
         Content::DO { pins } => {
-            let sender = Sender::new(sender, "digital out");
-            sender.digital_out(pins, diagnostics);
-        }
-    }
-}
-
-struct Sender<'task> {
-    ip: IpAddr,
-    task: &'task str,
-}
-
-impl<'task> Sender<'task> {
-    fn new(address: SocketAddr, task: &'task str) -> Self {
-        Sender {
-            task,
-            ip: address.ip(),
-        }
-    }
-
-    fn error(address: SocketAddr) {
-        Sender::new(address, "ERROR: ").prefix();
-    }
-
-    fn prefix(&self) {
-        print!("{}: {} ", self.ip, self.task);
-    }
-
-    fn diagnostics(&self, diagnostics: Diagnostics) {
-        self.prefix();
-        println!(
-            "at {:?} (+ {:?}) with period {:?} took {:?}",
-            Duration::from_micros(diagnostics.timestamp_us),
-            Duration::from_micros(diagnostics.jitter_in_us),
-            Duration::from_micros(diagnostics.period_in_us),
-            Duration::from_micros(diagnostics.execution_us),
-        );
-    }
-
-    fn digital_out(&self, pins: [(u8, bool); NUM_PINS_DO], diagnostics: Diagnostics) {
-        self.diagnostics(diagnostics);
-        for (pin, level) in pins {
-            self.prefix();
-            println!(
-                "pin {}: {}",
-                pin,
-                match level {
-                    false => "off",
-                    true => "on",
-                }
-            );
+            let logger = Logger::new(sender, "digital out");
+            logger.digital_out(pins, diagnostics);
         }
     }
 }

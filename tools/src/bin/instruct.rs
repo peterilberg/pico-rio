@@ -1,34 +1,104 @@
 use messages::Command;
-use postcard::to_slice;
-use std::{env, net::SocketAddr};
-use tokio::net::UdpSocket;
+use std::env::Args;
+
+use tools::instruction::{Instruction, Match, Strings, find_instruction, send_command};
 
 #[tokio::main]
 async fn main() {
-    let args: Vec<String> = env::args().collect();
-    let args2 = args.iter().map(|x| x.as_str()).collect::<Vec<_>>();
+    let Config {
+        destination,
+        command,
+    } = Config::build(std::env::args()).unwrap_or_else(|error| {
+        eprintln!("error: {}", error);
+        std::process::exit(1);
+    });
 
-    match args2[1..] {
-        ["digital_out", "set", "25", level] => {
-            let message = Command::SetDO {
-                pin: 25,
-                value: matches!(level, "on"),
+    let instructions: [&dyn Instruction; 1] = [&SetDigitalOut];
+
+    match find_instruction(&instructions, &command) {
+        Match::Full(instruction) => {
+            match process_instruction(instruction, &command, destination).await {
+                Ok(_) => (),
+                Err(err) => println!("error: {}", err),
             };
-
-            let socket = UdpSocket::bind("0.0.0.0:0").await.unwrap();
-            let mut buffer = [0_u8; 1024];
-            let msg = to_slice(&message, &mut buffer);
-            match msg {
-                Err(x) => println!("encoding failed {}", x),
-                Ok(msg) => {
-                    let remote = "192.168.7.1:1234".parse::<SocketAddr>().unwrap();
-                    match socket.send_to(msg, remote).await {
-                        Ok(x) => println!("send command {}", x),
-                        Err(x) => println!("fail command {}", x),
-                    }
-                }
-            }
         }
-        _ => println!("unknown command"),
+        Match::Partial(instruction) => {
+            usage(instruction);
+        }
+        Match::None => {
+            list_instructions(&instructions);
+        }
+    }
+}
+
+struct Config {
+    destination: String,
+    command: Vec<String>,
+}
+
+impl Config {
+    fn build(mut arguments: Args) -> Result<Self, String> {
+        arguments.next(); // ignore executable name
+
+        let destination = match arguments.next() {
+            Some(arg) => arg,
+            None => {
+                let message = String::from("missing destination:port");
+                return Self::error(message);
+            }
+        };
+
+        Ok(Config {
+            destination,
+            command: arguments.collect(),
+        })
+    }
+
+    fn error(message: String) -> Result<Self, String> {
+        let usage = String::from("usage: destination:port COMMAND");
+        Err([message, usage].join("\n"))
+    }
+}
+
+fn usage(instruction: &'static dyn Instruction) {
+    println!("usage: {}", instruction);
+}
+
+fn list_instructions(instructions: &[&'static dyn Instruction]) {
+    println!("Available commands:");
+    for instruction in instructions {
+        println!("    {}", instruction);
+    }
+}
+
+async fn process_instruction(
+    instruction: &'static dyn Instruction,
+    command: &[String],
+    destination: String,
+) -> Result<(), String> {
+    let first_argument = instruction.prefix().len();
+    let arguments = &command[first_argument..];
+    let command = instruction.run(arguments)?;
+    send_command(destination, command).await
+}
+
+struct SetDigitalOut;
+
+impl Instruction for SetDigitalOut {
+    fn prefix(&self) -> Strings {
+        &["digital", "out", "pin"]
+    }
+
+    fn arguments(&self) -> Strings {
+        &["PIN", "(on|off)"]
+    }
+
+    fn run(&self, arguments: &[String]) -> Result<Command, String> {
+        let pin = match arguments[0].parse::<u8>() {
+            Ok(pin) => pin,
+            Err(error) => return Err(error.to_string()),
+        };
+        let value = matches!(&*arguments[1], "on");
+        Ok(Command::SetDO { pin, value })
     }
 }
