@@ -1,8 +1,5 @@
 use messages::Command;
-use postcard::to_slice;
 use std::fmt;
-use std::net::SocketAddr;
-use tokio::net::UdpSocket;
 
 pub type Strings = &'static [&'static str];
 
@@ -37,25 +34,6 @@ pub fn find_instruction<'i>(instructions: &[&'i dyn Instruction], command: &[Str
     }
 
     Match::None
-}
-
-pub async fn send_command(destination: String, command: Command) -> Result<(), String> {
-    let socket = match UdpSocket::bind("0.0.0.0:0").await {
-        Ok(socket) => socket,
-        Err(error) => return Err(error.to_string()),
-    };
-
-    let mut buffer = [0_u8; 1024];
-    let message = match to_slice(&command, &mut buffer) {
-        Ok(message) => message,
-        Err(error) => return Err(error.to_string()),
-    };
-
-    let remote = destination.parse::<SocketAddr>().unwrap();
-    match socket.send_to(message, remote).await {
-        Ok(_) => Ok(()),
-        Err(error) => Err(error.to_string()),
-    }
 }
 
 impl fmt::Display for dyn Instruction {

@@ -1,7 +1,8 @@
 use messages::Command;
 use std::env::Args;
 
-use tools::instruction::{Instruction, Match, Strings, find_instruction, send_command};
+use tools::instruction::{Instruction, Match, Strings, find_instruction};
+use tools::network::{Socket, decode_content, encode_command, parse_address};
 
 #[tokio::main]
 async fn main() {
@@ -13,7 +14,7 @@ async fn main() {
         std::process::exit(1);
     });
 
-    let instructions: [&dyn Instruction; 1] = [&SetDigitalOut];
+    let instructions: [&dyn Instruction; _] = [&PingPong, &SetDigitalOut];
 
     match find_instruction(&instructions, &command) {
         Match::Full(instruction) => {
@@ -79,7 +80,36 @@ async fn process_instruction(
     let first_argument = instruction.prefix().len();
     let arguments = &command[first_argument..];
     let command = instruction.run(arguments)?;
-    send_command(destination, command).await
+
+    let mut buffer = [0_u8; 1024];
+    let data = encode_command(&command, &mut buffer)?;
+
+    let destination = parse_address(destination)?;
+    let socket = Socket::get().await?;
+    socket.send(destination, data).await?;
+
+    if let Command::Ping = command {
+        socket.recv(destination, &mut buffer).await?;
+        let content = decode_content(&buffer)?;
+        println!("{}: {:?}", destination, content);
+    }
+    Ok(())
+}
+
+struct PingPong;
+
+impl Instruction for PingPong {
+    fn prefix(&self) -> Strings {
+        &["ping"]
+    }
+
+    fn arguments(&self) -> Strings {
+        &[]
+    }
+
+    fn run(&self, _arguments: &[String]) -> Result<Command, String> {
+        Ok(Command::Ping)
+    }
 }
 
 struct SetDigitalOut;
