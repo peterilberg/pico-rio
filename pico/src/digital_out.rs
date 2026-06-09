@@ -42,7 +42,7 @@ pub async fn task(
 }
 
 async fn send_pin_levels(
-    pins: &[(u8, Output<'static>); NUM_PINS_DO],
+    pins: &[(u8, Output<'static>)],
     outbound: Outbox<outbound::Message>,
     timer: &mut Timer,
 ) {
@@ -65,7 +65,7 @@ async fn send_pin_levels(
         .await;
 }
 
-fn set_pin(pin: u8, value: bool, pins: &mut [(u8, Output<'static>); NUM_PINS_DO]) {
+fn set_pin(pin: u8, value: bool, pins: &mut [(u8, Output<'static>)]) {
     match pins.iter_mut().find(|(known_pin, _)| pin == *known_pin) {
         None => log::info!("digital_out: ignore unknown pin {}", pin),
         Some((_, output)) => {
