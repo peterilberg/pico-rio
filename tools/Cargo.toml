@@ -8,5 +8,6 @@ tokio = { version = "1", features = ["full"]}
 
 # message serialization
 postcard = { version = "1.1" }
+serde = { version = "1.0.203", default-features = false, features = ["derive"] }
 
 messages = { version = "0.1.0", path = "../messages" }

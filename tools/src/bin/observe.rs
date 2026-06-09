@@ -1,10 +1,10 @@
 use messages::{Content, Diagnostics, Info};
-use postcard::from_bytes;
 use std::env::Args;
-use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
-use tokio::net::UdpSocket;
+use std::net::SocketAddr;
+use std::time::Duration;
 
 use tools::logger::Logger;
+use tools::network::{Buffer, Socket};
 
 #[tokio::main]
 async fn main() {
@@ -14,16 +14,19 @@ async fn main() {
         std::process::exit(1);
     });
 
-    let address = SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, port);
-    let server = UdpSocket::bind(address).await.unwrap_or_else(|error| {
+    let server = Socket::bind(port).await.unwrap_or_else(|error| {
         eprintln!("error: {}", error);
         std::process::exit(1);
     });
 
-    let mut buffer = [0_u8; 1024];
+    let mut buffer = Buffer::new();
     loop {
-        let (_, sender) = server.recv_from(&mut buffer).await.unwrap();
-        match from_bytes::<Info>(&buffer) {
+        let wait = Duration::from_secs(5);
+        let Ok(sender) = server.recv(&mut buffer, wait).await else {
+            continue;
+        };
+
+        match buffer.decode::<Info>() {
             Ok(Info {
                 content,
                 diagnostics,
@@ -74,6 +77,10 @@ fn dispatch(sender: SocketAddr, diagnostics: Diagnostics, content: Content) {
         Content::Pong => {
             Logger::error(sender);
             println!("unexpected pong");
+        }
+        Content::DI { pins } => {
+            let logger = Logger::new(sender, "digital in");
+            logger.digital_in(pins, diagnostics);
         }
         Content::DO { pins } => {
             let logger = Logger::new(sender, "digital out");

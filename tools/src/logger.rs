@@ -1,4 +1,4 @@
-use messages::{Diagnostics, NUM_PINS_DO};
+use messages::{Diagnostics, NUM_PINS_DI, NUM_PINS_DO};
 use std::net::{IpAddr, SocketAddr};
 use std::time::Duration;
 
@@ -32,6 +32,21 @@ impl<'task> Logger<'task> {
             Duration::from_micros(diagnostics.period_in_us),
             Duration::from_micros(diagnostics.execution_us),
         );
+    }
+
+    pub fn digital_in(&self, pins: [(u8, bool); NUM_PINS_DI], diagnostics: Diagnostics) {
+        self.diagnostics(diagnostics);
+        for (pin, level) in pins {
+            self.prefix();
+            println!(
+                "pin {}: {}",
+                pin,
+                match level {
+                    false => "off",
+                    true => "on",
+                }
+            );
+        }
     }
 
     pub fn digital_out(&self, pins: [(u8, bool); NUM_PINS_DO], diagnostics: Diagnostics) {

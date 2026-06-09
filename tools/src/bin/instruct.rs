@@ -1,8 +1,9 @@
-use messages::Command;
+use messages::{Command, Info};
 use std::env::Args;
+use std::time::Duration;
 
 use tools::instruction::{Instruction, Match, Strings, find_instruction};
-use tools::network::{Socket, decode_content, encode_command, parse_address};
+use tools::network::{Buffer, Socket, parse_address};
 
 #[tokio::main]
 async fn main() {
@@ -81,17 +82,18 @@ async fn process_instruction(
     let arguments = &command[first_argument..];
     let command = instruction.run(arguments)?;
 
-    let mut buffer = [0_u8; 1024];
-    let data = encode_command(&command, &mut buffer)?;
+    let mut buffer = Buffer::new();
+    buffer.encode(&command)?;
 
     let destination = parse_address(destination)?;
-    let socket = Socket::get().await?;
-    socket.send(destination, data).await?;
+    let socket = Socket::bind(destination.port()).await?;
+    socket.send(destination, &buffer).await?;
 
     if let Command::Ping = command {
-        socket.recv(destination, &mut buffer).await?;
-        let content = decode_content(&buffer)?;
-        println!("{}: {:?}", destination, content);
+        let wait = Duration::from_secs(3);
+        let sender = socket.recv(&mut buffer, wait).await?;
+        let Info { content, .. } = buffer.decode::<Info>()?;
+        println!("{}: {:?}", sender, content);
     }
     Ok(())
 }
