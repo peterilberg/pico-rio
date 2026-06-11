@@ -6,9 +6,9 @@ use postcard::{from_bytes, to_slice};
 use static_cell::StaticCell;
 use {defmt_rtt as _, panic_probe as _};
 
-use crate::analog_out;
 use crate::digital_out;
 use crate::network::{self, SocketBuffers};
+use crate::{analog_out, bar_graph};
 
 #[embassy_executor::task]
 pub async fn task(stack: network::NetworkStack, port: u16) {
@@ -33,6 +33,9 @@ pub async fn task(stack: network::NetworkStack, port: u16) {
             }
             Command::SetAO { pin, value } => {
                 analog_out::set_pin(pin, value).await;
+            }
+            Command::BarGraph { pin } => {
+                bar_graph::select(pin).await;
             }
             command => {
                 log::info!("inbound: ignored command {:?}", command);

@@ -5,15 +5,14 @@ use embassy_sync::channel::Channel;
 use embassy_time::Duration;
 use heapless::Vec;
 use messages::{Content, NUM_PINS_AO};
-use serde::{Deserialize, Serialize};
 use {defmt_rtt as _, panic_probe as _};
 
+use crate::measurements;
 use crate::network;
 use crate::outbound;
 use crate::timer::Timer;
 use crate::watchdog;
 
-#[derive(Serialize, Deserialize, Debug, Eq, PartialEq)]
 enum Message {
     Set { pin: u8, value: u8 },
 }
@@ -68,6 +67,7 @@ async fn send_duty_cycles(pins: &[Pin], timer: &mut Timer) {
         state[i].1 = pin.duty_cycle;
     }
 
+    measurements::set_analog(&state).await;
     outbound::send(Content::AO { pins: state }, timer.stop()).await;
 }
 

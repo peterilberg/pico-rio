@@ -4,15 +4,14 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
 use embassy_time::Duration;
 use messages::{Content, NUM_PINS_DO};
-use serde::{Deserialize, Serialize};
 use {defmt_rtt as _, panic_probe as _};
 
+use crate::measurements;
 use crate::network;
 use crate::outbound;
 use crate::timer::Timer;
 use crate::watchdog;
 
-#[derive(Serialize, Deserialize, Debug, Eq, PartialEq)]
 enum Message {
     Set { pin: u8, value: bool },
 }
@@ -56,6 +55,7 @@ async fn send_pin_levels(pins: &[(u8, Output<'static>)], timer: &mut Timer) {
         };
     }
 
+    measurements::set_digital(&state).await;
     outbound::send(Content::DO { pins: state }, timer.stop()).await;
 }
 

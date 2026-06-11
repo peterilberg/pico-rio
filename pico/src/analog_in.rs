@@ -6,6 +6,7 @@ use embassy_time::Duration;
 use messages::{Content, NUM_PINS_AI};
 use {defmt_rtt as _, panic_probe as _};
 
+use crate::measurements;
 use crate::network;
 use crate::outbound;
 use crate::timer::Timer;
@@ -51,5 +52,6 @@ async fn send_adc_values(
         };
     }
 
+    measurements::set_analog(&state).await;
     outbound::send(Content::AI { pins: state }, timer.stop()).await;
 }

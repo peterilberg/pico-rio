@@ -3,6 +3,7 @@ use embassy_time::Duration;
 use messages::{Content, NUM_PINS_DI};
 use {defmt_rtt as _, panic_probe as _};
 
+use crate::measurements;
 use crate::network;
 use crate::outbound;
 use crate::timer::Timer;
@@ -33,5 +34,6 @@ async fn send_pin_levels(pins: &[(u8, Input<'static>)], timer: &mut Timer) {
         };
     }
 
+    measurements::set_digital(&state).await;
     outbound::send(Content::DI { pins: state }, timer.stop()).await;
 }

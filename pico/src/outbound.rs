@@ -8,7 +8,7 @@ use {defmt_rtt as _, panic_probe as _};
 
 use crate::network::{self, NetworkStack, SocketBuffers};
 
-pub type Message = Info;
+type Message = Info;
 
 static INBOX: Channel<CriticalSectionRawMutex, Message, 16> = Channel::new();
 

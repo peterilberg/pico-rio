@@ -15,7 +15,8 @@ async fn main() {
         std::process::exit(1);
     });
 
-    let instructions: [&dyn Instruction; _] = [&PingPong, &SetDigitalOut, &SetAnalogOut];
+    let instructions: [&dyn Instruction; _] =
+        [&PingPong, &SetDigitalOut, &SetAnalogOut, &SelectBarGraph];
 
     match find_instruction(&instructions, &command) {
         Match::Full(instruction) => {
@@ -156,5 +157,25 @@ impl Instruction for SetAnalogOut {
             Err(error) => return Err(error.to_string()),
         };
         Ok(Command::SetAO { pin, value })
+    }
+}
+
+struct SelectBarGraph;
+
+impl Instruction for SelectBarGraph {
+    fn prefix(&self) -> Strings {
+        &["bar_graph"]
+    }
+
+    fn arguments(&self) -> Strings {
+        &["PIN"]
+    }
+
+    fn run(&self, arguments: &[String]) -> Result<Command, String> {
+        let pin = match arguments[0].parse::<u8>() {
+            Ok(pin) => pin,
+            Err(error) => return Err(error.to_string()),
+        };
+        Ok(Command::BarGraph { pin })
     }
 }

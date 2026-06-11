@@ -20,9 +20,11 @@ use {defmt_rtt as _, panic_probe as _};
 
 mod analog_in;
 mod analog_out;
+mod bar_graph;
 mod digital_in;
 mod digital_out;
 mod inbound;
+mod measurements;
 mod network;
 mod outbound;
 mod timer;
@@ -60,6 +62,12 @@ fn main() -> ! {
         (8, Pwm::new_output_a(p.PWM_SLICE4, p.PIN_8, pwm.clone())),
     ];
 
+    let bar_graph = bar_graph::Control {
+        latch: Output::new(p.PIN_3, Level::Low),
+        clock: Output::new(p.PIN_2, Level::Low),
+        data: Output::new(p.PIN_4, Level::Low),
+    };
+
     static CORE1_STACK: StaticCell<Stack<8192>> = StaticCell::new();
     let mut core1_stack = CORE1_STACK.init(Stack::new());
 
@@ -71,7 +79,9 @@ fn main() -> ! {
         unsafe { &mut *core::ptr::addr_of_mut!(core1_stack) },
         || {
             EXECUTOR1.init(Executor::new()).run(|spawner| {
-                core1_task(spawner, p.ADC, pins_di, pins_do, pins_ai, pins_ao);
+                core1_task(
+                    spawner, p.ADC, pins_di, pins_do, pins_ai, pins_ao, bar_graph,
+                );
             });
         },
     );
@@ -126,6 +136,7 @@ fn core1_task(
     pins_do: [(u8, Output<'static>); NUM_PINS_DO],
     pins_ai: [(u8, Channel<'static>); NUM_PINS_AI],
     pins_ao: [(u8, Pwm<'static>); NUM_PINS_AO],
+    bar_graph: bar_graph::Control,
 ) {
     spawner.spawn(unwrap!(digital_in::task(
         Duration::from_millis(1000),
@@ -144,6 +155,8 @@ fn core1_task(
         Duration::from_millis(1000),
         pins_ao,
     )));
+    spawner.spawn(unwrap!(measurements::task()));
+    spawner.spawn(unwrap!(bar_graph::task(bar_graph)));
 }
 
 struct NetworkSettings {

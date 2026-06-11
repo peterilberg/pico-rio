@@ -12,6 +12,8 @@ pub enum Command {
 
     SetDO { pin: u8, value: bool },
     SetAO { pin: u8, value: u8 },
+
+    BarGraph { pin: u8 },
 }
 
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq)]
@@ -20,6 +22,7 @@ pub struct Info {
     pub diagnostics: Diagnostics,
 }
 
+pub const NUM_PINS: usize = 32;
 pub const NUM_PINS_DI: usize = 4;
 pub const NUM_PINS_DO: usize = 5;
 pub const NUM_PINS_AI: usize = 3;
