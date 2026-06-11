@@ -6,7 +6,6 @@ use embassy_time::Duration;
 use messages::{Content, NUM_PINS_AI};
 use {defmt_rtt as _, panic_probe as _};
 
-use crate::mailbox::Outbox;
 use crate::network;
 use crate::outbound;
 use crate::timer::Timer;
@@ -23,7 +22,6 @@ pub async fn task(
     interval: Duration,
     adc: Peri<'static, ADC>,
     mut pins: [(u8, Channel<'static>); NUM_PINS_AI],
-    outbound: Outbox<outbound::Message>,
 ) {
     network::wait_for_network().await;
 
@@ -31,7 +29,7 @@ pub async fn task(
     let mut timer = Timer::new(interval);
     loop {
         timer.wait().await;
-        send_adc_values(&mut adc, &mut pins, outbound, &mut timer).await;
+        send_adc_values(&mut adc, &mut pins, &mut timer).await;
 
         watchdog::notify();
     }
@@ -40,7 +38,6 @@ pub async fn task(
 async fn send_adc_values(
     adc: &mut Adc<'_, Async>,
     pins: &mut [(u8, Channel<'static>)],
-    outbound: Outbox<outbound::Message>,
     timer: &mut Timer,
 ) {
     timer.start();
@@ -54,10 +51,5 @@ async fn send_adc_values(
         };
     }
 
-    outbound
-        .send(outbound::Message {
-            content: Content::AI { pins: state },
-            diagnostics: timer.stop(),
-        })
-        .await;
+    outbound::send(Content::AI { pins: state }, timer.stop()).await;
 }

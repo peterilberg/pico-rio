@@ -1,22 +1,30 @@
 use embassy_futures::select::{Either, select};
 use embassy_rp::pwm::{Config, Pwm, SetDutyCycle};
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::channel::Channel;
 use embassy_time::Duration;
+use heapless::Vec;
 use messages::{Content, NUM_PINS_AO};
 use serde::{Deserialize, Serialize};
 use {defmt_rtt as _, panic_probe as _};
 
-use crate::mailbox::{Inbox, Outbox};
 use crate::network;
 use crate::outbound;
 use crate::timer::Timer;
 use crate::watchdog;
 
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq)]
-pub enum Message {
+enum Message {
     Set { pin: u8, value: u8 },
 }
 
-pub fn pwm_configuation(frequency_hz: u32) -> Config {
+static INBOX: Channel<CriticalSectionRawMutex, Message, 16> = Channel::new();
+
+pub async fn set_pin(pin: u8, value: u8) {
+    INBOX.send(Message::Set { pin, value }).await;
+}
+
+pub fn configuation(frequency_hz: u32) -> Config {
     let clock_freq_hz = embassy_rp::clocks::clk_sys_freq();
     let divider = 16u8;
     let period = (clock_freq_hz / (frequency_hz * divider as u32)) as u16 - 1;
@@ -28,23 +36,22 @@ pub fn pwm_configuation(frequency_hz: u32) -> Config {
 }
 
 #[embassy_executor::task]
-pub async fn task(
-    interval: Duration,
-    pins: [(u8, u8, Pwm<'static>); NUM_PINS_AO],
-    inbox: Inbox<Message>,
-    outbound: Outbox<outbound::Message>,
-) {
+pub async fn task(interval: Duration, pins: [(u8, Pwm<'static>); NUM_PINS_AO]) {
     network::wait_for_network().await;
 
-    let mut pins = pins;
+    let mut pins: Vec<Pin, NUM_PINS_AO> = pins
+        .into_iter()
+        .map(|(pin, pwm)| Pin::new(pin, pwm))
+        .collect();
+
     let mut timer = Timer::new(interval);
     loop {
-        match select(timer.wait(), inbox.receive()).await {
+        match select(timer.wait(), INBOX.receive()).await {
             Either::First(()) => {
-                send_duty_cycles(&pins, outbound, &mut timer).await;
+                send_duty_cycles(&pins[..], &mut timer).await;
             }
             Either::Second(Message::Set { pin, value }) => {
-                set_duty_cycle(pin, value, &mut pins);
+                get_pin(pin, &mut pins[..]).map(|pin| pin.set_duty_cycle(value));
             }
         }
 
@@ -52,47 +59,52 @@ pub async fn task(
     }
 }
 
-async fn send_duty_cycles(
-    pins: &[(u8, u8, Pwm<'static>)],
-    outbound: Outbox<outbound::Message>,
-    timer: &mut Timer,
-) {
+async fn send_duty_cycles(pins: &[Pin], timer: &mut Timer) {
     timer.start();
 
     let mut state = [(0_u8, 0_u8); NUM_PINS_AO];
-    for (i, (pin, value, _output)) in pins.iter().enumerate() {
-        state[i].0 = *pin;
-        state[i].1 = *value;
+    for (i, pin) in pins.iter().enumerate() {
+        state[i].0 = pin.pin;
+        state[i].1 = pin.duty_cycle;
     }
 
-    outbound
-        .send(outbound::Message {
-            content: Content::AO { pins: state },
-            diagnostics: timer.stop(),
-        })
-        .await;
+    outbound::send(Content::AO { pins: state }, timer.stop()).await;
 }
 
-fn set_duty_cycle(pin: u8, value: u8, pins: &mut [(u8, u8, Pwm<'static>)]) {
-    let Some((_, duty_cycle, output)) = pins.iter_mut().find(|(known_pin, _, _)| pin == *known_pin)
-    else {
-        log::info!("analog_out: ignore unknown pin {}", pin);
-        return;
-    };
+fn get_pin<'pins>(pin: u8, pins: &'pins mut [Pin]) -> Option<&'pins mut Pin> {
+    pins.iter_mut().find(|known_pin| pin == known_pin.pin)
+}
 
-    *duty_cycle = value.clamp(0, 100);
-    let result = if *duty_cycle == 0 {
-        output.set_duty_cycle_fully_off()
-    } else {
-        output.set_duty_cycle_percent(*duty_cycle)
-    };
+struct Pin {
+    pin: u8,
+    duty_cycle: u8,
+    pwm: Pwm<'static>,
+}
 
-    if let Err(error) = result {
-        log::info!(
-            "analog_out: duty cycle {} on pin {} failed: {:?}",
-            duty_cycle,
+impl Pin {
+    fn new(pin: u8, pwm: Pwm<'static>) -> Self {
+        Pin {
             pin,
-            error
-        );
+            duty_cycle: 0,
+            pwm,
+        }
+    }
+
+    fn set_duty_cycle(&mut self, value: u8) {
+        self.duty_cycle = value.clamp(0, 100);
+        let result = if self.duty_cycle == 0 {
+            self.pwm.set_duty_cycle_fully_off()
+        } else {
+            self.pwm.set_duty_cycle_percent(self.duty_cycle)
+        };
+
+        if let Err(error) = result {
+            log::info!(
+                "analog_out: duty cycle {} on pin {} failed: {:?}",
+                self.duty_cycle,
+                self.pin,
+                error
+            );
+        }
     }
 }

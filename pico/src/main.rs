@@ -18,23 +18,16 @@ use messages::{NUM_PINS_AI, NUM_PINS_AO, NUM_PINS_DI, NUM_PINS_DO};
 use static_cell::StaticCell;
 use {defmt_rtt as _, panic_probe as _};
 
-use crate::mailbox::Mailbox;
-
 mod analog_in;
 mod analog_out;
 mod digital_in;
 mod digital_out;
 mod inbound;
-mod mailbox;
 mod network;
 mod outbound;
 mod timer;
 mod usb;
 mod watchdog;
-
-static OUTBOUND: Mailbox<outbound::Message> = Mailbox::<outbound::Message>::new();
-static ANALOG_OUT: Mailbox<analog_out::Message> = Mailbox::<analog_out::Message>::new();
-static DIGITAL_OUT: Mailbox<digital_out::Message> = Mailbox::<digital_out::Message>::new();
 
 #[cortex_m_rt::entry]
 fn main() -> ! {
@@ -61,10 +54,10 @@ fn main() -> ! {
         (28, Channel::new_pin(p.PIN_28, Pull::None)),
     ];
 
-    let pwm = analog_out::pwm_configuation(100);
+    let pwm = analog_out::configuation(100);
     let pins_ao = [
-        (6, 0, Pwm::new_output_a(p.PWM_SLICE3, p.PIN_6, pwm.clone())),
-        (8, 0, Pwm::new_output_a(p.PWM_SLICE4, p.PIN_8, pwm.clone())),
+        (6, Pwm::new_output_a(p.PWM_SLICE3, p.PIN_6, pwm.clone())),
+        (8, Pwm::new_output_a(p.PWM_SLICE4, p.PIN_8, pwm.clone())),
     ];
 
     static CORE1_STACK: StaticCell<Stack<8192>> = StaticCell::new();
@@ -116,17 +109,13 @@ fn core0_task(
     spawner.spawn(unwrap!(network::notify_when_available(network_stack)));
 
     spawner.spawn(unwrap!(watchdog::task(watchdog, Duration::from_secs(3))));
-    spawner.spawn(unwrap!(inbound::task(
-        network_stack,
-        network_settings.port,
-        ANALOG_OUT.sender(),
-        DIGITAL_OUT.sender(),
-    )));
+    spawner.spawn(unwrap!(
+        inbound::task(network_stack, network_settings.port,)
+    ));
 
     spawner.spawn(unwrap!(outbound::task(
         network_stack,
         network_settings.destination,
-        OUTBOUND.receiver()
     )));
 }
 
@@ -136,30 +125,24 @@ fn core1_task(
     pins_di: [(u8, Input<'static>); NUM_PINS_DI],
     pins_do: [(u8, Output<'static>); NUM_PINS_DO],
     pins_ai: [(u8, Channel<'static>); NUM_PINS_AI],
-    pins_ao: [(u8, u8, Pwm<'static>); NUM_PINS_AO],
+    pins_ao: [(u8, Pwm<'static>); NUM_PINS_AO],
 ) {
     spawner.spawn(unwrap!(digital_in::task(
         Duration::from_millis(1000),
         pins_di,
-        OUTBOUND.sender(),
     )));
     spawner.spawn(unwrap!(digital_out::task(
         Duration::from_millis(1000),
         pins_do,
-        DIGITAL_OUT.receiver(),
-        OUTBOUND.sender(),
     )));
     spawner.spawn(unwrap!(analog_in::task(
         Duration::from_millis(1000),
         adc,
         pins_ai,
-        OUTBOUND.sender(),
     )));
     spawner.spawn(unwrap!(analog_out::task(
         Duration::from_millis(1000),
         pins_ao,
-        ANALOG_OUT.receiver(),
-        OUTBOUND.sender(),
     )));
 }
 

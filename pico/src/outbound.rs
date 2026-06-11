@@ -1,16 +1,28 @@
 use embassy_net::IpEndpoint;
-use messages::Info;
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::channel::Channel;
+use messages::{Content, Diagnostics, Info};
 use postcard::to_slice;
 use static_cell::StaticCell;
 use {defmt_rtt as _, panic_probe as _};
 
-use crate::mailbox::Inbox;
 use crate::network::{self, NetworkStack, SocketBuffers};
 
 pub type Message = Info;
 
+static INBOX: Channel<CriticalSectionRawMutex, Message, 16> = Channel::new();
+
+pub async fn send(content: Content, diagnostics: Diagnostics) {
+    INBOX
+        .send(Message {
+            content,
+            diagnostics,
+        })
+        .await;
+}
+
 #[embassy_executor::task]
-pub async fn task(stack: NetworkStack, endpoint: IpEndpoint, inbox: Inbox<Message>) {
+pub async fn task(stack: NetworkStack, endpoint: IpEndpoint) {
     network::wait_for_network().await;
 
     static BUFFERS: StaticCell<SocketBuffers> = StaticCell::new();
@@ -19,7 +31,7 @@ pub async fn task(stack: NetworkStack, endpoint: IpEndpoint, inbox: Inbox<Messag
     log::info!("outbound: endpoint {:?}", socket.endpoint());
 
     loop {
-        let message = inbox.receive().await;
+        let message = INBOX.receive().await;
 
         let mut buf = [0; 256];
         let Ok(bytes) = to_slice(&message, &mut buf) else {

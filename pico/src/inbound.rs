@@ -8,16 +8,10 @@ use {defmt_rtt as _, panic_probe as _};
 
 use crate::analog_out;
 use crate::digital_out;
-use crate::mailbox::Outbox;
 use crate::network::{self, SocketBuffers};
 
 #[embassy_executor::task]
-pub async fn task(
-    stack: network::NetworkStack,
-    port: u16,
-    analog_out: Outbox<analog_out::Message>,
-    digital_out: Outbox<digital_out::Message>,
-) {
+pub async fn task(stack: network::NetworkStack, port: u16) {
     network::wait_for_network().await;
 
     static BUFFERS: StaticCell<network::SocketBuffers> = StaticCell::new();
@@ -35,10 +29,10 @@ pub async fn task(
                 ping_pong(&socket, endpoint).await;
             }
             Command::SetDO { pin, value } => {
-                set_do(digital_out, pin, value).await;
+                digital_out::set_pin(pin, value).await;
             }
             Command::SetAO { pin, value } => {
-                set_ao(analog_out, pin, value).await;
+                analog_out::set_pin(pin, value).await;
             }
             command => {
                 log::info!("inbound: ignored command {:?}", command);
@@ -94,16 +88,4 @@ async fn ping_pong(socket: &UdpSocket<'_>, endpoint: IpEndpoint) {
             log::info!("inbound: error: {:?}", e);
         }
     };
-}
-
-async fn set_do(digital_out: Outbox<digital_out::Message>, pin: u8, value: bool) {
-    digital_out
-        .send(digital_out::Message::Set { pin, value })
-        .await;
-}
-
-async fn set_ao(analog_out: Outbox<analog_out::Message>, pin: u8, value: u8) {
-    analog_out
-        .send(analog_out::Message::Set { pin, value })
-        .await;
 }
