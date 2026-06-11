@@ -26,10 +26,12 @@ pub fn find_instruction<'i>(instructions: &[&'i dyn Instruction], command: &[Str
         let prefix_len = instruction.prefix().len();
         let args_len = instruction.arguments().len();
 
-        if matching_words == prefix_len && command.len() == prefix_len + args_len {
-            return Match::Full(*instruction);
-        } else if matching_words > 0 {
-            return Match::Partial(*instruction);
+        if matching_words == prefix_len {
+            if command.len() == prefix_len + args_len {
+                return Match::Full(*instruction);
+            } else {
+                return Match::Partial(*instruction);
+            }
         }
     }
 

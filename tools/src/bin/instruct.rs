@@ -15,8 +15,18 @@ async fn main() {
         std::process::exit(1);
     });
 
-    let instructions: [&dyn Instruction; _] =
-        [&PingPong, &SetDigitalOut, &SetAnalogOut, &SelectBarGraph];
+    let instructions: [&dyn Instruction; _] = [
+        &PingPong,
+        &SetDigitalOut,
+        &SetAnalogOut,
+        &SelectBarGraph,
+        &StartBangBang,
+        &StopBangBang,
+        &SetBangBangInput,
+        &SetBangBangOutput,
+        &SetBangBangLowerLimit,
+        &SetBangBangUpperLimit,
+    ];
 
     match find_instruction(&instructions, &command) {
         Match::Full(instruction) => {
@@ -123,7 +133,7 @@ impl Instruction for SetDigitalOut {
     }
 
     fn arguments(&self) -> Strings {
-        &["PIN", "(on|off)"]
+        &["PIN", "on|off"]
     }
 
     fn run(&self, arguments: &[String]) -> Result<Command, String> {
@@ -144,7 +154,7 @@ impl Instruction for SetAnalogOut {
     }
 
     fn arguments(&self) -> Strings {
-        &["PIN", "(0-100)"]
+        &["PIN", "0-100"]
     }
 
     fn run(&self, arguments: &[String]) -> Result<Command, String> {
@@ -177,5 +187,117 @@ impl Instruction for SelectBarGraph {
             Err(error) => return Err(error.to_string()),
         };
         Ok(Command::BarGraph { pin })
+    }
+}
+
+struct StartBangBang;
+
+impl Instruction for StartBangBang {
+    fn prefix(&self) -> Strings {
+        &["bang_bang", "start"]
+    }
+
+    fn arguments(&self) -> Strings {
+        &[]
+    }
+
+    fn run(&self, _arguments: &[String]) -> Result<Command, String> {
+        Ok(Command::BangBangStart)
+    }
+}
+
+struct StopBangBang;
+
+impl Instruction for StopBangBang {
+    fn prefix(&self) -> Strings {
+        &["bang_bang", "stop"]
+    }
+
+    fn arguments(&self) -> Strings {
+        &[]
+    }
+
+    fn run(&self, _arguments: &[String]) -> Result<Command, String> {
+        Ok(Command::BangBangStop)
+    }
+}
+
+struct SetBangBangInput;
+
+impl Instruction for SetBangBangInput {
+    fn prefix(&self) -> Strings {
+        &["bang_bang", "input"]
+    }
+
+    fn arguments(&self) -> Strings {
+        &["PIN"]
+    }
+
+    fn run(&self, arguments: &[String]) -> Result<Command, String> {
+        let pin = match arguments[0].parse::<u8>() {
+            Ok(pin) => pin,
+            Err(error) => return Err(error.to_string()),
+        };
+        Ok(Command::BangBangInput { pin })
+    }
+}
+
+struct SetBangBangOutput;
+
+impl Instruction for SetBangBangOutput {
+    fn prefix(&self) -> Strings {
+        &["bang_bang", "output"]
+    }
+
+    fn arguments(&self) -> Strings {
+        &["PIN"]
+    }
+
+    fn run(&self, arguments: &[String]) -> Result<Command, String> {
+        let pin = match arguments[0].parse::<u8>() {
+            Ok(pin) => pin,
+            Err(error) => return Err(error.to_string()),
+        };
+        Ok(Command::BangBangOutput { pin })
+    }
+}
+
+struct SetBangBangLowerLimit;
+
+impl Instruction for SetBangBangLowerLimit {
+    fn prefix(&self) -> Strings {
+        &["bang_bang", "lower"]
+    }
+
+    fn arguments(&self) -> Strings {
+        &["0-100"]
+    }
+
+    fn run(&self, arguments: &[String]) -> Result<Command, String> {
+        let value = match arguments[0].parse::<u8>() {
+            Ok(pin) => pin,
+            Err(error) => return Err(error.to_string()),
+        };
+        Ok(Command::BangBangLowerLimit { value })
+    }
+}
+
+struct SetBangBangUpperLimit;
+
+impl Instruction for SetBangBangUpperLimit {
+    fn prefix(&self) -> Strings {
+        &["bang_bang", "upper"]
+    }
+
+    fn arguments(&self) -> Strings {
+        &["0-100"]
+    }
+
+    fn run(&self, arguments: &[String]) -> Result<Command, String> {
+        let value = match arguments[0].parse::<u8>() {
+            Ok(pin) => pin,
+            Err(error) => return Err(error.to_string()),
+        };
+        Ok(Command::BangBangUpperLimit { value })
     }
 }

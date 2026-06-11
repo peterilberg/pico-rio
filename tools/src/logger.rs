@@ -1,4 +1,5 @@
-use messages::{Diagnostics, NUM_PINS_AI, NUM_PINS_AO, NUM_PINS_DI, NUM_PINS_DO};
+use messages::{BangBang, Diagnostics, Mode};
+use messages::{NUM_PINS_AI, NUM_PINS_AO, NUM_PINS_DI, NUM_PINS_DO};
 use std::net::{IpAddr, SocketAddr};
 use std::time::Duration;
 
@@ -42,14 +43,7 @@ impl<'task> Logger<'task> {
         self.diagnostics(diagnostics);
         for (pin, level) in pins {
             self.prefix();
-            println!(
-                "pin {}: {}",
-                pin,
-                match level {
-                    false => "off",
-                    true => "on",
-                }
-            );
+            println!("pin {}: {}", pin, get_level(level),);
         }
     }
 
@@ -57,14 +51,7 @@ impl<'task> Logger<'task> {
         self.diagnostics(diagnostics);
         for (pin, level) in pins {
             self.prefix();
-            println!(
-                "pin {}: {}",
-                pin,
-                match level {
-                    false => "off",
-                    true => "on",
-                }
-            );
+            println!("pin {}: {}", pin, get_level(level),);
         }
     }
 
@@ -72,7 +59,7 @@ impl<'task> Logger<'task> {
         self.diagnostics(diagnostics);
         for (pin, value) in pins {
             self.prefix();
-            println!("pin {}: {}%", pin, value);
+            println!("pin {}: {}", pin, value);
         }
     }
 
@@ -80,7 +67,36 @@ impl<'task> Logger<'task> {
         self.diagnostics(diagnostics);
         for (pin, value) in pins {
             self.prefix();
-            println!("pin {}: {}%", pin, value);
+            println!("pin {}: {}", pin, value);
         }
+    }
+
+    pub fn bang_bang(&self, settings: BangBang, diagnostics: Diagnostics) {
+        self.diagnostics(diagnostics);
+        self.prefix();
+        println!("mode:        {}", get_mode(settings.mode));
+        self.prefix();
+        println!("input pin:   {}", settings.input);
+        self.prefix();
+        println!("output pin:  {}", settings.output);
+        self.prefix();
+        println!("lower limit: {}", settings.lower_limit);
+        self.prefix();
+        println!("upper limit: {}", settings.upper_limit);
+    }
+}
+
+fn get_level(level: bool) -> &'static str {
+    match level {
+        false => "off",
+        true => "on",
+    }
+}
+
+fn get_mode(mode: Mode) -> &'static str {
+    match mode {
+        Mode::Off => "off",
+        Mode::Running => "running",
+        Mode::Waiting => "waiting",
     }
 }

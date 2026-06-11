@@ -3,6 +3,7 @@ use embassy_sync::channel::Channel;
 use messages::NUM_PINS;
 use {defmt_rtt as _, panic_probe as _};
 
+use crate::bang_bang;
 use crate::bar_graph;
 use crate::network;
 
@@ -41,6 +42,7 @@ pub async fn task() {
 
         if recorded_new_measurement {
             bar_graph::notify(&measurements).await;
+            bang_bang::notify(&measurements).await;
         }
     }
 }

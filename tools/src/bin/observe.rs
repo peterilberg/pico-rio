@@ -94,6 +94,10 @@ fn dispatch(sender: SocketAddr, diagnostics: Diagnostics, content: Content) {
             let logger = Logger::new(sender, "analog out");
             logger.analog_out(pins, diagnostics);
         }
+        Content::BangBang { settings } => {
+            let logger = Logger::new(sender, "bang bang");
+            logger.bang_bang(settings, diagnostics);
+        }
     };
     Logger::separator();
 }

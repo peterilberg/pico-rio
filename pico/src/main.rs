@@ -20,6 +20,7 @@ use {defmt_rtt as _, panic_probe as _};
 
 mod analog_in;
 mod analog_out;
+mod bang_bang;
 mod bar_graph;
 mod digital_in;
 mod digital_out;
@@ -157,6 +158,7 @@ fn core1_task(
     )));
     spawner.spawn(unwrap!(measurements::task()));
     spawner.spawn(unwrap!(bar_graph::task(bar_graph)));
+    spawner.spawn(unwrap!(bang_bang::task(Duration::from_millis(1000))));
 }
 
 struct NetworkSettings {
