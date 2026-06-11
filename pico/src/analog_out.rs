@@ -50,7 +50,9 @@ pub async fn task(interval: Duration, pins: [(u8, Pwm<'static>); NUM_PINS_AO]) {
                 send_duty_cycles(&pins[..], &mut timer).await;
             }
             Either::Second(Message::Set { pin, value }) => {
-                get_pin(pin, &mut pins[..]).map(|pin| pin.set_duty_cycle(value));
+                if let Some(pin) = get_pin(pin, &mut pins[..]) {
+                    pin.set_duty_cycle(value);
+                }
             }
         }
 
@@ -71,7 +73,7 @@ async fn send_duty_cycles(pins: &[Pin], timer: &mut Timer) {
     outbound::send(Content::AO { pins: state }, timer.stop()).await;
 }
 
-fn get_pin<'pins>(pin: u8, pins: &'pins mut [Pin]) -> Option<&'pins mut Pin> {
+fn get_pin(pin: u8, pins: &mut [Pin]) -> Option<&mut Pin> {
     pins.iter_mut().find(|known_pin| pin == known_pin.pin)
 }
 

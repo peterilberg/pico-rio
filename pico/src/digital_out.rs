@@ -34,8 +34,9 @@ pub async fn task(interval: Duration, pins: [(u8, Output<'static>); NUM_PINS_DO]
                 send_pin_levels(&pins, &mut timer).await;
             }
             Either::Second(Message::Set { pin, value }) => {
-                let level = get_level(value);
-                get_pin(pin, &mut pins).map(|pin| pin.set_level(level));
+                if let Some(pin) = get_pin(pin, &mut pins) {
+                    pin.set_level(get_level(value));
+                }
             }
         }
 
