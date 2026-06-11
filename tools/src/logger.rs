@@ -1,4 +1,4 @@
-use messages::{Diagnostics, NUM_PINS_DI, NUM_PINS_DO};
+use messages::{Diagnostics, NUM_PINS_AI, NUM_PINS_AO, NUM_PINS_DI, NUM_PINS_DO};
 use std::net::{IpAddr, SocketAddr};
 use std::time::Duration;
 
@@ -17,6 +17,10 @@ impl<'task> Logger<'task> {
 
     pub fn error(address: SocketAddr) {
         Logger::new(address, "ERROR: ").prefix();
+    }
+
+    pub fn separator() {
+        println!();
     }
 
     pub fn prefix(&self) {
@@ -61,6 +65,22 @@ impl<'task> Logger<'task> {
                     true => "on",
                 }
             );
+        }
+    }
+
+    pub fn analog_in(&self, pins: [(u8, u8); NUM_PINS_AI], diagnostics: Diagnostics) {
+        self.diagnostics(diagnostics);
+        for (pin, value) in pins {
+            self.prefix();
+            println!("pin {}: {}%", pin, value);
+        }
+    }
+
+    pub fn analog_out(&self, pins: [(u8, u8); NUM_PINS_AO], diagnostics: Diagnostics) {
+        self.diagnostics(diagnostics);
+        for (pin, value) in pins {
+            self.prefix();
+            println!("pin {}: {}%", pin, value);
         }
     }
 }

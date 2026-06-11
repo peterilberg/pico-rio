@@ -86,5 +86,14 @@ fn dispatch(sender: SocketAddr, diagnostics: Diagnostics, content: Content) {
             let logger = Logger::new(sender, "digital out");
             logger.digital_out(pins, diagnostics);
         }
-    }
+        Content::AI { pins } => {
+            let logger = Logger::new(sender, "analog in");
+            logger.analog_in(pins, diagnostics);
+        }
+        Content::AO { pins } => {
+            let logger = Logger::new(sender, "analog out");
+            logger.analog_out(pins, diagnostics);
+        }
+    };
+    Logger::separator();
 }

@@ -4,20 +4,24 @@
 use defmt::*;
 use embassy_executor::{Executor, Spawner};
 use embassy_net::{IpEndpoint, Ipv4Address, Ipv4Cidr};
+use embassy_rp::adc::Channel;
 use embassy_rp::gpio::{Input, Level, Output, Pull};
 use embassy_rp::multicore::{Stack, spawn_core1};
+use embassy_rp::pwm::Pwm;
 use embassy_rp::{
     Peri,
-    peripherals::{USB, WATCHDOG},
+    peripherals::{ADC, USB, WATCHDOG},
 };
 use embassy_time::Duration;
 use heapless::Vec;
-use messages::{NUM_PINS_DI, NUM_PINS_DO};
+use messages::{NUM_PINS_AI, NUM_PINS_AO, NUM_PINS_DI, NUM_PINS_DO};
 use static_cell::StaticCell;
 use {defmt_rtt as _, panic_probe as _};
 
 use crate::mailbox::Mailbox;
 
+mod analog_in;
+mod analog_out;
 mod digital_in;
 mod digital_out;
 mod inbound;
@@ -29,6 +33,7 @@ mod usb;
 mod watchdog;
 
 static OUTBOUND: Mailbox<outbound::Message> = Mailbox::<outbound::Message>::new();
+static ANALOG_OUT: Mailbox<analog_out::Message> = Mailbox::<analog_out::Message>::new();
 static DIGITAL_OUT: Mailbox<digital_out::Message> = Mailbox::<digital_out::Message>::new();
 
 #[cortex_m_rt::entry]
@@ -50,6 +55,18 @@ fn main() -> ! {
         (25, Output::new(p.PIN_25, Level::Low)),
     ];
 
+    let pins_ai = [
+        (26, Channel::new_pin(p.PIN_26, Pull::None)),
+        (27, Channel::new_pin(p.PIN_27, Pull::None)),
+        (28, Channel::new_pin(p.PIN_28, Pull::None)),
+    ];
+
+    let pwm = analog_out::pwm_configuation(100);
+    let pins_ao = [
+        (6, 0, Pwm::new_output_a(p.PWM_SLICE3, p.PIN_6, pwm.clone())),
+        (8, 0, Pwm::new_output_a(p.PWM_SLICE4, p.PIN_8, pwm.clone())),
+    ];
+
     static CORE1_STACK: StaticCell<Stack<8192>> = StaticCell::new();
     let mut core1_stack = CORE1_STACK.init(Stack::new());
 
@@ -61,7 +78,7 @@ fn main() -> ! {
         unsafe { &mut *core::ptr::addr_of_mut!(core1_stack) },
         || {
             EXECUTOR1.init(Executor::new()).run(|spawner| {
-                core1_task(spawner, pins_di, pins_do);
+                core1_task(spawner, p.ADC, pins_di, pins_do, pins_ai, pins_ao);
             });
         },
     );
@@ -102,7 +119,8 @@ fn core0_task(
     spawner.spawn(unwrap!(inbound::task(
         network_stack,
         network_settings.port,
-        DIGITAL_OUT.sender()
+        ANALOG_OUT.sender(),
+        DIGITAL_OUT.sender(),
     )));
 
     spawner.spawn(unwrap!(outbound::task(
@@ -114,8 +132,11 @@ fn core0_task(
 
 fn core1_task(
     spawner: Spawner,
+    adc: Peri<'static, ADC>,
     pins_di: [(u8, Input<'static>); NUM_PINS_DI],
     pins_do: [(u8, Output<'static>); NUM_PINS_DO],
+    pins_ai: [(u8, Channel<'static>); NUM_PINS_AI],
+    pins_ao: [(u8, u8, Pwm<'static>); NUM_PINS_AO],
 ) {
     spawner.spawn(unwrap!(digital_in::task(
         Duration::from_millis(1000),
@@ -126,6 +147,18 @@ fn core1_task(
         Duration::from_millis(1000),
         pins_do,
         DIGITAL_OUT.receiver(),
+        OUTBOUND.sender(),
+    )));
+    spawner.spawn(unwrap!(analog_in::task(
+        Duration::from_millis(1000),
+        adc,
+        pins_ai,
+        OUTBOUND.sender(),
+    )));
+    spawner.spawn(unwrap!(analog_out::task(
+        Duration::from_millis(1000),
+        pins_ao,
+        ANALOG_OUT.receiver(),
         OUTBOUND.sender(),
     )));
 }

@@ -6,6 +6,7 @@ use postcard::{from_bytes, to_slice};
 use static_cell::StaticCell;
 use {defmt_rtt as _, panic_probe as _};
 
+use crate::analog_out;
 use crate::digital_out;
 use crate::mailbox::Outbox;
 use crate::network::{self, SocketBuffers};
@@ -14,6 +15,7 @@ use crate::network::{self, SocketBuffers};
 pub async fn task(
     stack: network::NetworkStack,
     port: u16,
+    analog_out: Outbox<analog_out::Message>,
     digital_out: Outbox<digital_out::Message>,
 ) {
     network::wait_for_network().await;
@@ -34,6 +36,9 @@ pub async fn task(
             }
             Command::SetDO { pin, value } => {
                 set_do(digital_out, pin, value).await;
+            }
+            Command::SetAO { pin, value } => {
+                set_ao(analog_out, pin, value).await;
             }
             command => {
                 log::info!("inbound: ignored command {:?}", command);
@@ -94,5 +99,11 @@ async fn ping_pong(socket: &UdpSocket<'_>, endpoint: IpEndpoint) {
 async fn set_do(digital_out: Outbox<digital_out::Message>, pin: u8, value: bool) {
     digital_out
         .send(digital_out::Message::Set { pin, value })
+        .await;
+}
+
+async fn set_ao(analog_out: Outbox<analog_out::Message>, pin: u8, value: u8) {
+    analog_out
+        .send(analog_out::Message::Set { pin, value })
         .await;
 }

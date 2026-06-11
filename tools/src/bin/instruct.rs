@@ -15,7 +15,7 @@ async fn main() {
         std::process::exit(1);
     });
 
-    let instructions: [&dyn Instruction; _] = [&PingPong, &SetDigitalOut];
+    let instructions: [&dyn Instruction; _] = [&PingPong, &SetDigitalOut, &SetAnalogOut];
 
     match find_instruction(&instructions, &command) {
         Match::Full(instruction) => {
@@ -118,7 +118,7 @@ struct SetDigitalOut;
 
 impl Instruction for SetDigitalOut {
     fn prefix(&self) -> Strings {
-        &["digital", "out", "pin"]
+        &["digital"]
     }
 
     fn arguments(&self) -> Strings {
@@ -132,5 +132,29 @@ impl Instruction for SetDigitalOut {
         };
         let value = matches!(&*arguments[1], "on");
         Ok(Command::SetDO { pin, value })
+    }
+}
+
+struct SetAnalogOut;
+
+impl Instruction for SetAnalogOut {
+    fn prefix(&self) -> Strings {
+        &["analog"]
+    }
+
+    fn arguments(&self) -> Strings {
+        &["PIN", "(0-100)"]
+    }
+
+    fn run(&self, arguments: &[String]) -> Result<Command, String> {
+        let pin = match arguments[0].parse::<u8>() {
+            Ok(pin) => pin,
+            Err(error) => return Err(error.to_string()),
+        };
+        let value = match arguments[1].parse::<u8>() {
+            Ok(value) => value,
+            Err(error) => return Err(error.to_string()),
+        };
+        Ok(Command::SetAO { pin, value })
     }
 }
