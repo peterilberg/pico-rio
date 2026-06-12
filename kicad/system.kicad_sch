@@ -581,7 +581,7 @@
 	)
 	(wire
 		(pts
-			(xy 180.34 99.06) (xy 189.23 99.06)
+			(xy 186.69 99.06) (xy 195.58 99.06)
 		)
 		(stroke
 			(width 0)
@@ -591,7 +591,7 @@
 	)
 	(wire
 		(pts
-			(xy 170.18 99.06) (xy 161.29 99.06)
+			(xy 176.53 99.06) (xy 161.29 99.06)
 		)
 		(stroke
 			(width 0)
@@ -611,7 +611,7 @@
 	)
 	(global_label "Drain"
 		(shape input)
-		(at 189.23 99.06 0)
+		(at 195.58 99.06 0)
 		(fields_autoplaced yes)
 		(effects
 			(font
@@ -621,7 +621,7 @@
 		)
 		(uuid "38a156e2-44d8-4ac3-841d-457d3a97befe")
 		(property "Intersheetrefs" "${INTERSHEET_REFS}"
-			(at 197.1742 99.06 0)
+			(at 203.5242 99.06 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -925,33 +925,35 @@
 		)
 	)
 	(symbol
-		(lib_id "pico-rio:Valve")
-		(at 175.26 99.06 0)
+		(lib_id "pico-rio:Sensor")
+		(at 153.67 105.41 180)
 		(unit 1)
 		(exclude_from_sim no)
 		(in_bom yes)
 		(on_board yes)
 		(dnp no)
 		(fields_autoplaced yes)
-		(uuid "5a2e3b7d-1a15-466b-a56f-f9ee4cc6c2a1")
-		(property "Reference" "VLV2"
-			(at 175.26 91.44 0)
+		(uuid "57717bfe-3455-4e76-b76c-87ae7c43fce2")
+		(property "Reference" "SNS3"
+			(at 156.21 104.1399 0)
 			(effects
 				(font
 					(size 1.27 1.27)
 				)
+				(justify right)
 			)
 		)
-		(property "Value" "Drain"
-			(at 175.26 93.98 0)
+		(property "Value" "Emergency"
+			(at 156.21 106.6799 0)
 			(effects
 				(font
 					(size 1.27 1.27)
 				)
+				(justify right)
 			)
 		)
 		(property "Footprint" ""
-			(at 175.26 99.06 0)
+			(at 153.67 105.41 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -960,7 +962,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 175.26 99.06 0)
+			(at 153.67 105.41 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -969,7 +971,72 @@
 			)
 		)
 		(property "Description" ""
-			(at 175.26 99.06 0)
+			(at 153.67 105.41 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(pin "1"
+			(uuid "3dbe967a-8dcc-4b20-89b1-cefaf135d90b")
+		)
+		(instances
+			(project "system"
+				(path "/9b126da4-a818-4f6e-b5fc-eb980603cbf8"
+					(reference "SNS3")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
+		(lib_id "pico-rio:Valve")
+		(at 181.61 99.06 0)
+		(unit 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(fields_autoplaced yes)
+		(uuid "5a2e3b7d-1a15-466b-a56f-f9ee4cc6c2a1")
+		(property "Reference" "VLV2"
+			(at 181.61 91.44 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Value" "Drain"
+			(at 181.61 93.98 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Footprint" ""
+			(at 181.61 99.06 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Datasheet" ""
+			(at 181.61 99.06 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Description" ""
+			(at 181.61 99.06 0)
 			(effects
 				(font
 					(size 1.27 1.27)

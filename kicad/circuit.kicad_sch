@@ -3327,6 +3327,16 @@
 	)
 	(wire
 		(pts
+			(xy 92.71 73.66) (xy 100.33 73.66)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "19d0395f-bbd1-4723-ba31-95f47b9fa9fd")
+	)
+	(wire
+		(pts
 			(xy 171.45 39.37) (xy 175.26 39.37)
 		)
 		(stroke
@@ -3887,6 +3897,16 @@
 	)
 	(wire
 		(pts
+			(xy 100.33 71.12) (xy 92.71 71.12)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "da603d26-b1ef-414e-9234-1a0d9d26e7c8")
+	)
+	(wire
+		(pts
 			(xy 66.04 170.18) (xy 72.39 170.18)
 		)
 		(stroke
@@ -4059,6 +4079,28 @@
 					(size 1.27 1.27)
 				)
 				(justify right)
+				(hide yes)
+			)
+		)
+	)
+	(global_label "SOURCE"
+		(shape input)
+		(at 100.33 73.66 0)
+		(fields_autoplaced yes)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left)
+		)
+		(uuid "1389f240-a0ee-48b4-9b28-869322983487")
+		(property "Intersheetrefs" "${INTERSHEET_REFS}"
+			(at 110.8747 73.66 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
 				(hide yes)
 			)
 		)
@@ -4257,6 +4299,28 @@
 					(size 1.27 1.27)
 				)
 				(justify right)
+				(hide yes)
+			)
+		)
+	)
+	(global_label "DRAIN"
+		(shape input)
+		(at 100.33 71.12 0)
+		(fields_autoplaced yes)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left)
+		)
+		(uuid "6c09fd46-953d-4f0c-946e-a1312bbc75fc")
+		(property "Intersheetrefs" "${INTERSHEET_REFS}"
+			(at 108.8791 71.12 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
 				(hide yes)
 			)
 		)
