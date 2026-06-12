@@ -5,7 +5,7 @@
 	(uuid "ab48db55-0259-4fd2-a900-3952423ed41a")
 	(paper "A4")
 	(title_block
-		(title "Circuit diagrams for pico-rio.")
+		(title "Circuit diagram for pico-rio")
 		(date "2026-06-12")
 		(rev "0")
 	)
