@@ -22,3 +22,6 @@ target
 
 # KiCad backup files
 **/*.bak
+
+# drawio backup files
+**/*.bkp

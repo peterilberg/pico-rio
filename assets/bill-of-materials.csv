@@ -1,5 +1,4 @@
-"Reference","Qty","Value","Datasheet"
-"A1","1","RaspberryPi_Pico","https://datasheets.raspberrypi.com/pico/pico-datasheet.pdf"
+"Reference","Quantity","Description","Datasheet"
 "BAR1","1","Bar graph","https://docs.broadcom.com/docs/AV02-1798EN"
 "C1","1","4.7u","~"
 "D1","1","Source valve","~"
@@ -8,4 +7,5 @@
 "R3,R4,R5,R6,R7,R8,R9,R10,R11,R12","10","330","~"
 "RV1","1","Fill level","~"
 "SW1","1","{dblquote}Snap wire{dblquote}","~"
-"U1","1","74HC595","http://www.ti.com/lit/ds/symlink/sn74hc595.pdf"
+"U1","1","RaspberryPi_Pico","https://datasheets.raspberrypi.com/pico/pico-datasheet.pdf"
+"U2","1","74HC595","http://www.ti.com/lit/ds/symlink/sn74hc595.pdf"

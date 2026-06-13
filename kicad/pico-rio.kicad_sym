@@ -381,7 +381,7 @@
 		)
 		(symbol "Tank_1_1"
 			(pin bidirectional line
-				(at -7.62 -6.35 0)
+				(at -7.62 6.35 0)
 				(length 2.54)
 				(name ""
 					(effects

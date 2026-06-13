@@ -5109,7 +5109,7 @@
 		(dnp no)
 		(fields_autoplaced yes)
 		(uuid "5e9a1b59-40b9-46db-8421-8249a6cb9cff")
-		(property "Reference" "A1"
+		(property "Reference" "U1"
 			(at 71.9933 107.95 0)
 			(effects
 				(font
@@ -5277,7 +5277,7 @@
 		(instances
 			(project "circuit"
 				(path "/ab48db55-0259-4fd2-a900-3952423ed41a"
-					(reference "A1")
+					(reference "U1")
 					(unit 1)
 				)
 			)
@@ -5867,7 +5867,7 @@
 		(dnp no)
 		(fields_autoplaced yes)
 		(uuid "d576c1cc-08cb-4efe-ad02-903e13197b34")
-		(property "Reference" "U1"
+		(property "Reference" "U2"
 			(at 58.0233 144.78 0)
 			(effects
 				(font
@@ -5963,7 +5963,7 @@
 		(instances
 			(project "circuit"
 				(path "/ab48db55-0259-4fd2-a900-3952423ed41a"
-					(reference "U1")
+					(reference "U2")
 					(unit 1)
 				)
 			)

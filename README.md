@@ -2,32 +2,17 @@
 
 Measurement and control with the Raspberry Pi Pico RP 2040.
 
-## pico-usb-ethernet
+## Overview
 
-Ethernet over USB for the Raspberry Pi Pico RP 2040.
+The goal of this project is to learn embedded development with Rust and its Embassy framework on the Raspberry Pi Pico.
 
-## Motivation
+I took inspiration for the application and the architecture of the system from the industrial systems I encountered at work. The [application](#Application) is a simple fill controller for a water tank.
 
-I have several Raspberry Pi Pico development boards based on the RP 2040.
-These boards do not include Wifi or Bluetooth capabilities. The only
-means for communication is the USB connection to the host computer.
+## Credits
 
-The goal of this project is to experiment with UDP-over-USB to provide
-a more convenient communication mechanism between the Pico and the host
-computer. I want to be able to plug my Pico into my laptop and be able
-to send messages and receive messages.
+This project is based on the excellent [examples](https://github.com/embassy-rs/embassy/blob/main/examples/rp/) for the Raspberry Pi Pico in the Embassy project. In particular, the networking code is heavily based on [usb_ethernet.rs](https://github.com/embassy-rs/embassy/blob/main/examples/rp/src/bin/usb_ethernet.rs).
 
-I have found that three requirements must be met for my use case:
-
-- The Pico appears to the host compiler as a network interface.
-
-- The Pico has a static IP address (arbitrarily hardcoded to 192.168.7.1)
-because my laptop does not run a DHCP server.
-
-- The Pico has to run its own DHCP server. The DHCP server assigns a
-local IP address to the host computer. The host computer acts as a
-gateway to the rest of the network. In particular, the Pico can
-send messages to virtual machines running on the host.
+Messages and commands are encoded and decoded with the `postcard` crate. The DHCP server is provided by the `leasehound` crate.
 
 ## Building
 
@@ -51,68 +36,188 @@ send messages to virtual machines running on the host.
         cargo run --release
         popd
 
-      *Note*: We build `pico-rio.uf2`, we don't install it. Edit `.cargo/config.toml` if you want to build and install it on your Raspberry Pi Pico with `probe-rs`.
+   d. Alternatively, run the build script from the project root folder to build all projects:
 
-## Use
+        ./build.sh
 
-Install `build/pico-usb-ethernet.uf2` on your Raspberry Pi Pico by
-copying it to the Pico when then Pico is in boot mode. For example,
-on macOS:
+   *Note*: We build `pico-rio.uf2`, we don't install it. Edit `.cargo/config.toml` if you want to build and install it on your Pico with `probe-rs`.
 
-    cp build/pico-usb-ethernet.uf2 /Volumes/RPI-RP2
+3. Install `build/pico-usb-ethernet.uf2` on your Pico by copying it to the Pico when the Pico is in boot mode. For example, on macOS:
 
-The Pico reboots and runs the program.
+        cp build/pico-usb-ethernet.uf2 /Volumes/RPI-RP2
 
-By default, the Pico registers itself under the hardcoded IP address
-192.168.7.1. It echos UDP packets sent to port 12345, and sends
-periodic health updates to the hardcoded IP address 192.168.64.47
-and port 12345 (because that's the local address of my host computer).
-Adjust these addresses and ports in [./src/main.c](./src/main.c) to match your set-up.
+4. Use the tools in the [./tools/](./tools/) folder to talk to the Pico.
 
-Use the tools in the [./tools/](./tools/) folder to talk to the Pico:
+   Adjust the hardcoded addresses and ports in `NetworkSettings` at the bottom of [./pico/src/main.rs](./pico/src/main.rs) to match your configuration. By default, the Pico
 
-    ./tools/build/echo 192.168.7.1 12345
+   - listens on 192.168.7.1 and port 1234
+   - sends to 192.168.64.47 and port 12345
 
-Sends a message to the Pico and prints the response (echo).
+## Tools
 
-    ./tools/build/health 12345
+### Observe
 
-Prints the health updates that the Pico sends to the host computer.
-Currently, that's only the Pico's IP address and hostname.
+    cargo run --bin observe PORT
 
-## Attribution and License
+The `observe` tool listens for messages from the Pico on the specified `PORT`. The tool prints status information for the running tasks and measurements. For example:
 
-This project is derived from Peter Lawrence's example webserver in
-the TinyUSB distribution. A copy is included in the Pico SDK at
+```
+192.168.7.1: digital in at 6.005357s (+ 0ns) with period 1s took 64µs
+192.168.7.1: digital in pin 18: off
+192.168.7.1: digital in pin 19: on
+192.168.7.1: digital in pin 20: off
+192.168.7.1: digital in pin 21: off
+```
 
-[./pico-sdk/lib/tinyusb/examples/device/net_lwip_webserver/src/main.c](./pico-sdk/lib/tinyusb/examples/device/net_lwip_webserver/src/main.c)
+Pipe the output through grep if you want to focus on specific items.
 
-A copy of his original copyright notice is reproduced below.
-See the LICENSE file for the licensing information of my project.
+### Instruct
 
-    /*
-     * The MIT License (MIT)
-     *
-     * Copyright (c) 2020 Peter Lawrence
-     *
-     * influenced by lrndis https://github.com/fetisov/lrndis
-     *
-     * Permission is hereby granted, free of charge, to any person obtaining a copy
-     * of this software and associated documentation files (the "Software"), to deal
-     * in the Software without restriction, including without limitation the rights
-     * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-     * copies of the Software, and to permit persons to whom the Software is
-     * furnished to do so, subject to the following conditions:
-     *
-     * The above copyright notice and this permission notice shall be included in
-     * all copies or substantial portions of the Software.
-     *
-     * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-     * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-     * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-     * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-     * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-     * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-     * THE SOFTWARE.
-     *
-     */
+    cargo run --bin instruct ADDRESS:PORT COMMAND
+
+The `instruct` tool sends `COMMAND` to the Pico at the specified `ADDRESS` and `PORT`. Refer to the [Application](#application) section and the default [pin assignments](#core-1) for more information on how to use these commands and where to find `PIN` numbers.
+
+Available commands are:
+
+```
+ping
+```
+
+Test the connection to the Pico.
+
+```
+digital PIN on|off
+```
+
+Turn a digital `PIN` `on` or `off`.
+
+```
+analog PIN 0-100
+```
+
+Set the duty cycle of the PWM on `PIN` to a value in the range 0 to 100.
+
+```
+bar_graph PIN
+```
+
+Show the value of `PIN` on the LED bar. Analog values from 0 to 100 are scaled to 0 to 8 LEDs. Digital values light up either no LEDs (`off`) or all LEDs (`on`).
+
+```
+bang_bang start
+```
+
+Start the bang-bang controller.
+
+```
+bang_bang stop
+```
+
+Stop the bang-bang controller.
+
+```
+bang_bang input PIN
+```
+
+Set the input `PIN` of the bang-bang controller.
+
+```
+bang_bang output PIN
+```
+
+Set the output `PIN` of the bang-bang controller.
+
+```
+bang_bang lower 0-100
+```
+
+Set the lower bound of the bang-bang controller to a value in the range 0 to 100.
+
+```
+bang_bang upper 0-100
+```
+
+Set the upper bound of the bang-bang controller to a value in the range 0 to 100.
+
+
+## System architecture
+
+The system is split up into tasks that communicate with each other. Core 0 of the Pico handles network communication with the host computer. Core 1 runs the application tasks that take measurements and control outputs.
+
+![Tasks](assets/tasks.svg)
+
+### Core 0
+
+| Function | Task | Description |
+|-|-|-|
+| USB | `usb_task` | Controls the USB connection. |
+| USB | `logging_task` | Provides a serial port interface for logging. |
+| Network | `ethernet_task` | Implements the ethernet protocol on top of the USB connection. |
+| Network | `network_task` | Provides the UDP/IP network stack. |
+| Network | `notify_when_available` | Signals to the other tasks when the network stack is ready to use. |
+| Network | `dhcp_server` | Provides a DHCP server from the `leasehound` crate. It assigns a local address to the Pico. And importantly, it assigns a local address to the host computer so that it can act as a gateway to the outside world. |
+| Network | `inbound` | Waits for commands to the Pico. |
+| Network | `outbound` | Sends messages from the Pico. |
+| Watchdog| `watchdog` | Restarts the system if the system becomes unresponsive. Application tasks have to notify the watchdog at least once every three seconds that they are running normally. |
+
+All network communication for the application, commands and messages, goes through the `inbound` and `outbound` tasks. Commands and messages are encoded in the `postcard` format from the `postcard` crate.
+
+### Core 1
+
+| Function | Task | Pins | Description |
+|-|-|-|-|
+| Measurements | `digital_in` | 18, 19, 20, 21 | Samples digital input pins and reports their levels. |
+| Measurements | `digital_out` | 10, 11, 12, 13, 25 (built-in LED) | Sets digital output pins and reports their levels. |
+| Measurements | `analog_in` | 26, 27, 28 | Samples analog input pins with the built-in ADC and reports their levels. |
+| Measurements | `analog_out` | 6, 8 | Sets analog output pins with the built-in PWM and reports their levels. |
+| Measurements | `measurements` | | Collects the current values of all input and output pins. |
+| Control | `bang_bang` | | Implements a simple bang-bang controller. When input is<br/>- below the upper limit, turn on the output.<br/>- above the upper limit, turn off the output.<br/>- falls below the upper limit, wait until it hits the lower limit.<br/>- falls below the lower limit, turn on the output again.<br/>The output is proportional to the different between the input and the upper limit. |
+| Debugging | `bar_graph` | 2 (clock), 3 (latch), 4 (data) | Shows one of the current `measurements` in an LED bar with eight LEDs. The LED bar is driven by a 74HC595 shift register with control pins `clock`, `latch`, and `data`. |
+
+## Application
+
+The application is a simple fill controller for a water tank.
+
+### System diagram
+
+![System diagram](assets/system.svg)
+
+Water enters the system from the `source`. The `pump` pumps the waters into the `tank` when the `source` valve is open. When the `drain` valve is open, water leaves the tank and flows into the `drain`.
+
+### Prototype circuit
+
+The prototyping circuit simulates actuators and sensors with LEDs, buttons, and variable resistors.
+
+| Item | Kind | Function | Circuit | Pin |
+|-|-|-|-|-|
+| Tank | Tank | The water tank. | - | - |
+| Source | Source | The water source. | - | - |
+| Drain | Drain | The water drain. | - | - |
+| Pump | Actuator | Pumps water from source to tank. | PWM signal with duty-cycle 0 to 100. | 6 |
+| Source valve | Actuator | Normally closed valve controls flow from source to tank. | Red LED. On when valve is open. | Set 10, Feedback 20 |
+| Drain valve | Actuator | Normally open valve controls flow from tank to drain. | Yellow LED. On when valve is open. | Set 11, Feedback 21 |
+| Pump speed | Sensor | Measures speed of pump. | Low-pass filter from PWM to voltage. Range 0 to 100. | 26 (ADC_0) |
+| Fill level | Sensor | Measures fill level of tank. | Manually controlled variable resistor. | 27 (ADC_1) |
+| Emergency | Sensor | Detects emergency, for example, when tank is too full. | Push button. Pulls down when pressed. | 19 |
+| - | Display | Shows measurements in bar graph. | LED bar of 8 LEDs. | Clock 2, latch 3, data 4 |
+
+![Circuit diagram](assets/circuit.svg)
+
+### Breadboard implementation
+
+![Breadboard](assets/breadboard.png)
+
+### Bill of materials
+
+| Reference | Quantity | Description      | Datasheet |
+|-----------|----------|------------------|-----------|
+| BAR1      | 1        | LED bar        | [Datasheet](https://docs.broadcom.com/docs/AV02-1798EN) |
+| U1        | 1        | Raspberry Pi Pico | [Datasheet](https://datasheets.raspberrypi.com/pico/pico-datasheet.pdf) |
+| C1 | 1 | 4.7u |  |
+| D1 | 1 | Red LED |  |
+| D2 | 1 | Yellow LED |  |
+| R1,R2 | 2 | 10k |  |
+| R3-R12 | 10 | 330 |  |
+| RV1 | 1 | 10k linear variable resistor |  |
+| SW1 | 1 | Push button |  |
+| U2 | 1 | 74HC595 | <<http://www.ti.com/lit/ds/symlink/sn74hc595.pdf> |
