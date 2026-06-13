@@ -6,7 +6,7 @@ Measurement and control with the Raspberry Pi Pico RP 2040.
 
 The goal of this project is to learn embedded development with Rust and its Embassy framework on the Raspberry Pi Pico.
 
-I took inspiration for the application and the architecture of the system from the industrial systems I encountered at work. The [application](#Application) is a simple fill controller for a water tank.
+I took inspiration for the application and the architecture of the system from the industrial systems I encountered at work. The [application](#application) is a simple fill controller for a water tank.
 
 ## Credits
 
@@ -139,7 +139,6 @@ bang_bang upper 0-100
 
 Set the upper bound of the bang-bang controller to a value in the range 0 to 100.
 
-
 ## System architecture
 
 The system is split up into tasks that communicate with each other. Core 0 of the Pico handles network communication with the host computer. Core 1 runs the application tasks that take measurements and control outputs.
@@ -220,4 +219,4 @@ The prototyping circuit simulates actuators and sensors with LEDs, buttons, and 
 | R3-R12 | 10 | 330 |  |
 | RV1 | 1 | 10k linear variable resistor |  |
 | SW1 | 1 | Push button |  |
-| U2 | 1 | 74HC595 | <<http://www.ti.com/lit/ds/symlink/sn74hc595.pdf> |
+| U2 | 1 | 74HC595 | [Datasheet](http://www.ti.com/lit/ds/symlink/sn74hc595.pdf) |
