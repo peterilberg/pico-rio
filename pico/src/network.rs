@@ -92,13 +92,10 @@ impl NetworkStack {
         } = buffers;
         let mut socket = UdpSocket::new(*stack, rx_meta, rx_buffer, tx_meta, tx_buffer);
 
-        match stack.config_v4() {
-            None => {}
-            Some(config) => {
-                let address = IpAddress::Ipv4(config.address.address());
-                let endpoint = IpEndpoint::new(address, port);
-                let _ = socket.bind(endpoint);
-            }
+        if let Some(config) = stack.config_v4() {
+            let address = IpAddress::Ipv4(config.address.address());
+            let endpoint = IpEndpoint::new(address, port);
+            let _ = socket.bind(endpoint);
         }
 
         socket
@@ -158,8 +155,7 @@ pub async fn notify_when_available(stack: NetworkStack) {
 }
 
 pub async fn wait_for_network() {
-    match NETWORK_READY.receiver() {
-        None => {}
-        Some(mut network) => network.changed().await,
+    if let Some(mut network) = NETWORK_READY.receiver() {
+        network.changed().await;
     }
 }

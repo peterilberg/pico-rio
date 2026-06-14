@@ -106,10 +106,7 @@ async fn ping_pong(socket: &UdpSocket<'_>, endpoint: IpEndpoint) {
         return;
     };
 
-    match socket.send_to(bytes, endpoint).await {
-        Ok(()) => {}
-        Err(e) => {
-            log::info!("inbound: error: {:?}", e);
-        }
+    if let Err(error) = socket.send_to(bytes, endpoint).await {
+        log::info!("inbound: error: {:?}", error);
     };
 }

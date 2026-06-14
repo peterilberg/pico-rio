@@ -39,11 +39,8 @@ pub async fn task(stack: NetworkStack, endpoint: IpEndpoint) {
             continue;
         };
 
-        match socket.send_to(bytes, endpoint).await {
-            Ok(()) => {}
-            Err(e) => {
-                log::info!("outbound: error: {:?}", e);
-            }
+        if let Err(error) = socket.send_to(bytes, endpoint).await {
+            log::info!("outbound: error: {:?}", error);
         };
     }
 }
