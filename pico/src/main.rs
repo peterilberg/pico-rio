@@ -7,11 +7,15 @@ use embassy_net::{IpEndpoint, Ipv4Address, Ipv4Cidr};
 use embassy_rp::adc::Channel;
 use embassy_rp::gpio::{Input, Level, Output, Pull};
 use embassy_rp::multicore::{Stack, spawn_core1};
+use embassy_rp::pac::spi;
+use embassy_rp::peripherals::{DMA_CH0, DMA_CH1};
 use embassy_rp::pwm::Pwm;
+use embassy_rp::spi::{Config, Spi};
 use embassy_rp::{
     Peri,
-    peripherals::{ADC, USB, WATCHDOG},
+    peripherals::{ADC, SPI0, USB, WATCHDOG},
 };
+use embassy_rp::{bind_interrupts, dma};
 use embassy_time::Duration;
 use heapless::Vec;
 use messages::{NUM_PINS_AI, NUM_PINS_AO, NUM_PINS_DI, NUM_PINS_DO};
@@ -21,9 +25,9 @@ use {defmt_rtt as _, panic_probe as _};
 mod analog_in;
 mod analog_out;
 mod bang_bang;
-mod bar_graph;
 mod digital_in;
 mod digital_out;
+mod display;
 mod inbound;
 mod measurements;
 mod network;
@@ -31,6 +35,10 @@ mod outbound;
 mod timer;
 mod usb;
 mod watchdog;
+
+bind_interrupts!(struct Irqs {
+    DMA_IRQ_0 => dma::InterruptHandler<DMA_CH0>, dma::InterruptHandler<DMA_CH1>;
+});
 
 #[cortex_m_rt::entry]
 fn main() -> ! {
@@ -63,10 +71,13 @@ fn main() -> ! {
         (8, Pwm::new_output_a(p.PWM_SLICE4, p.PIN_8, pwm.clone())),
     ];
 
-    let bar_graph = bar_graph::Control {
-        latch: Output::new(p.PIN_3, Level::Low),
-        clock: Output::new(p.PIN_2, Level::Low),
-        data: Output::new(p.PIN_4, Level::Low),
+    let config = Config::default();
+    let spi0 = Spi::new_txonly(p.SPI0, p.PIN_2, p.PIN_3, p.DMA_CH0, Irqs, config);
+    let display = display::Config {
+        spi: spi0,
+        reset: Output::new(p.PIN_0, Level::Low),
+        d_c: Output::new(p.PIN_1, Level::Low),
+        cs: Output::new(p.PIN_5, Level::Low),
     };
 
     static CORE1_STACK: StaticCell<Stack<8192>> = StaticCell::new();
@@ -80,9 +91,7 @@ fn main() -> ! {
         unsafe { &mut *core::ptr::addr_of_mut!(core1_stack) },
         || {
             EXECUTOR1.init(Executor::new()).run(|spawner| {
-                core1_task(
-                    spawner, p.ADC, pins_di, pins_do, pins_ai, pins_ao, bar_graph,
-                );
+                core1_task(spawner, p.ADC, pins_di, pins_do, pins_ai, pins_ao, display);
             });
         },
     );
@@ -137,7 +146,7 @@ fn core1_task(
     pins_do: [(u8, Output<'static>); NUM_PINS_DO],
     pins_ai: [(u8, Channel<'static>); NUM_PINS_AI],
     pins_ao: [(u8, Pwm<'static>); NUM_PINS_AO],
-    bar_graph: bar_graph::Control,
+    display: display::Config,
 ) {
     spawner.spawn(unwrap!(digital_in::task(
         Duration::from_millis(1000),
@@ -157,7 +166,9 @@ fn core1_task(
         pins_ao,
     )));
     spawner.spawn(unwrap!(measurements::task()));
-    spawner.spawn(unwrap!(bar_graph::task(bar_graph)));
+    log::info!("hello");
+    spawner.spawn(unwrap!(display::task(display)));
+    log::info!("hello2");
     spawner.spawn(unwrap!(bang_bang::task(Duration::from_millis(1000))));
 }
 

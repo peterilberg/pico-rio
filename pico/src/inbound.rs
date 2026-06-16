@@ -8,7 +8,7 @@ use {defmt_rtt as _, panic_probe as _};
 
 use crate::analog_out;
 use crate::bang_bang;
-use crate::bar_graph;
+// use crate::bar_graph;
 use crate::digital_out;
 use crate::network::{self, SocketBuffers};
 
@@ -37,7 +37,7 @@ pub async fn task(stack: network::NetworkStack, port: u16) {
                 analog_out::set_pin(pin, value).await;
             }
             Command::BarGraph { pin } => {
-                bar_graph::select(pin).await;
+                // bar_graph::select(pin).await;
             }
             Command::BangBangStart => {
                 bang_bang::start().await;
