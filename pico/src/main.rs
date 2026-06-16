@@ -71,11 +71,12 @@ fn main() -> ! {
         (8, Pwm::new_output_a(p.PWM_SLICE4, p.PIN_8, pwm.clone())),
     ];
 
-    let config = Config::default();
+    let mut config = Config::default();
+    //config.frequency = 40_000_000;
     let spi0 = Spi::new_txonly(p.SPI0, p.PIN_2, p.PIN_3, p.DMA_CH0, Irqs, config);
     let display = display::Config {
         spi: spi0,
-        reset: Output::new(p.PIN_0, Level::Low),
+        reset: Output::new(p.PIN_0, Level::High),
         d_c: Output::new(p.PIN_1, Level::Low),
         cs: Output::new(p.PIN_5, Level::Low),
     };
