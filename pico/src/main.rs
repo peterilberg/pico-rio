@@ -147,20 +147,20 @@ fn core1_task(
     display: display::Config,
 ) {
     spawner.spawn(unwrap!(digital_in::task(
-        Duration::from_millis(500),
+        Duration::from_millis(1000),
         pins_di,
     )));
     spawner.spawn(unwrap!(digital_out::task(
-        Duration::from_millis(500),
+        Duration::from_millis(1000),
         pins_do,
     )));
     spawner.spawn(unwrap!(analog_in::task(
-        Duration::from_millis(500),
+        Duration::from_millis(1000),
         adc,
         pins_ai,
     )));
     spawner.spawn(unwrap!(analog_out::task(
-        Duration::from_millis(500),
+        Duration::from_millis(1000),
         pins_ao,
     )));
     spawner.spawn(unwrap!(measurements::task()));
