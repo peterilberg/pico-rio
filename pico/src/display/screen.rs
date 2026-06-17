@@ -1,10 +1,13 @@
-use display_interface::DisplayError;
-use heapless::String;
+use embedded_hal_1::digital::OutputPin;
+use embedded_hal_async::spi::SpiDevice;
+use heapless::{String, Vec};
+use ssd1306::size::DisplaySizeAsync;
 use {defmt_rtt as _, panic_probe as _};
 
-use super::device;
+use crate::display::device::Device;
+use crate::measurements::Measurements;
 
-#[derive(Debug, PartialEq)]
+#[derive(PartialEq)]
 pub enum Value {
     None,
     OffOn(u8),
@@ -12,46 +15,47 @@ pub enum Value {
     Number(u8),
 }
 
-#[derive(Debug)]
 struct Line {
-    text: heapless::String<16>,
+    text: String<16>,
     value: Value,
 }
 
 struct Page {
-    lines: heapless::Vec<Line, 5>,
+    lines: Vec<Line, 5>,
 }
 
-type Stack = heapless::Vec<Page, 3>;
-
-pub struct Screen<SPI, DC> {
-    stack: Stack,
-    display: device::Display<SPI, DC>,
+pub struct Screen<SPI, DC, SIZE: DisplaySizeAsync> {
+    pages: Vec<Page, 3>,
+    device: Device<SPI, DC, SIZE>,
 }
 
-impl<SPI, DC> Screen<SPI, DC> {
-    pub fn build(display: device::Display<SPI, DC>) -> Result<Self, DisplayError> {
+impl<SPI, DC, SIZE> Screen<SPI, DC, SIZE>
+where
+    SIZE: DisplaySizeAsync,
+{
+    pub fn new(device: Device<SPI, DC, SIZE>) -> Self
+    where
+        SIZE: DisplaySizeAsync,
+    {
         let mut screen = Screen {
-            stack: Stack::new(),
-            display: display,
+            pages: Vec::new(),
+            device: device,
         };
         screen.push_page();
-        Ok(screen)
+        screen
     }
 
     pub fn push_page(&mut self) {
-        let page = Page {
-            lines: heapless::Vec::new(),
-        };
-        let _ = self.stack.push(page);
+        let page = Page { lines: Vec::new() };
+        let _ = self.pages.push(page);
     }
 
     pub fn pop_page(&mut self) {
-        self.stack.pop();
+        self.pages.pop();
     }
 
     pub fn add_line(&mut self, text: &str, value: Value) {
-        let Some(page) = self.stack.last_mut() else {
+        let Some(page) = self.pages.last_mut() else {
             return;
         };
         let Ok(text) = String::try_from(text) else {
@@ -64,29 +68,29 @@ impl<SPI, DC> Screen<SPI, DC> {
         });
     }
 
-    pub async fn draw(&mut self)
+    pub async fn draw(&mut self, measurements: &Measurements)
     where
-        SPI: embedded_hal_async::spi::SpiDevice,
-        DC: embedded_hal_1::digital::OutputPin,
+        SPI: SpiDevice,
+        DC: OutputPin,
+        SIZE: DisplaySizeAsync,
     {
-        let display = &mut self.display;
+        let device = &mut self.device;
+        device.clear();
 
-        display.clear();
-        let Some(screen) = self.stack.last() else {
+        let Some(page) = self.pages.last() else {
             return;
         };
 
-        for (row, line) in (0..).zip(screen.lines.iter()) {
-            log::info!("{} {:?}", row, line);
-            display.draw_text(row, line.text.as_str());
+        for (row, line) in (0..).zip(page.lines.iter()) {
+            device.draw_text(row, line.text.as_str());
 
             match line.value {
                 Value::None => {}
-                Value::OffOn(pin) => display.draw_off_on(row, 0 != 0),
-                Value::OnOff(pin) => display.draw_off_on(row, 0 == 0),
-                Value::Number(pin) => display.draw_number(row, 42),
+                Value::OffOn(pin) => device.draw_off_on(row, measurements[pin as usize] != 0),
+                Value::OnOff(pin) => device.draw_off_on(row, measurements[pin as usize] == 0),
+                Value::Number(pin) => device.draw_number(row, measurements[pin as usize]),
             }
         }
-        display.refresh().await;
+        device.refresh().await;
     }
 }

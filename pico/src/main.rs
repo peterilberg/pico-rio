@@ -7,13 +7,12 @@ use embassy_net::{IpEndpoint, Ipv4Address, Ipv4Cidr};
 use embassy_rp::adc::Channel;
 use embassy_rp::gpio::{Input, Level, Output, Pull};
 use embassy_rp::multicore::{Stack, spawn_core1};
-use embassy_rp::pac::spi;
 use embassy_rp::peripherals::{DMA_CH0, DMA_CH1};
 use embassy_rp::pwm::Pwm;
 use embassy_rp::spi::{Config, Spi};
 use embassy_rp::{
     Peri,
-    peripherals::{ADC, SPI0, USB, WATCHDOG},
+    peripherals::{ADC, USB, WATCHDOG},
 };
 use embassy_rp::{bind_interrupts, dma};
 use embassy_time::Duration;
@@ -148,26 +147,24 @@ fn core1_task(
     display: display::Config,
 ) {
     spawner.spawn(unwrap!(digital_in::task(
-        Duration::from_millis(1000),
+        Duration::from_millis(500),
         pins_di,
     )));
     spawner.spawn(unwrap!(digital_out::task(
-        Duration::from_millis(1000),
+        Duration::from_millis(500),
         pins_do,
     )));
     spawner.spawn(unwrap!(analog_in::task(
-        Duration::from_millis(1000),
+        Duration::from_millis(500),
         adc,
         pins_ai,
     )));
     spawner.spawn(unwrap!(analog_out::task(
-        Duration::from_millis(1000),
+        Duration::from_millis(500),
         pins_ao,
     )));
     spawner.spawn(unwrap!(measurements::task()));
-    log::info!("hello");
     spawner.spawn(unwrap!(display::task(display)));
-    log::info!("hello2");
     spawner.spawn(unwrap!(bang_bang::task(Duration::from_millis(1000))));
 }
 

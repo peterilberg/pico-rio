@@ -13,8 +13,6 @@ pub enum Command {
     SetDO { pin: u8, value: bool },
     SetAO { pin: u8, value: u8 },
 
-    BarGraph { pin: u8 },
-
     BangBangStart,
     BangBangStop,
 

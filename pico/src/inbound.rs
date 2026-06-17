@@ -36,9 +36,6 @@ pub async fn task(stack: network::NetworkStack, port: u16) {
             Command::SetAO { pin, value } => {
                 analog_out::set_pin(pin, value).await;
             }
-            Command::BarGraph { pin } => {
-                // bar_graph::select(pin).await;
-            }
             Command::BangBangStart => {
                 bang_bang::start().await;
             }

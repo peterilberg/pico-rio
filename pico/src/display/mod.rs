@@ -6,16 +6,19 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
 use embassy_time::Delay;
 use embedded_hal_bus::spi::ExclusiveDevice;
+use ssd1306::size::DisplaySize128x64;
 use {defmt_rtt as _, panic_probe as _};
 
+use crate::display::device::Device;
+use crate::display::screen::Screen;
 use crate::measurements::Measurements;
 use crate::network;
+use messages::NUM_PINS;
 
 mod device;
 mod screen;
 
 enum Message {
-    Select { pin: u8 },
     Measurements { measurements: Measurements },
 }
 
@@ -26,64 +29,49 @@ pub async fn notify(measurements: &Measurements) {
     INBOX.send(Message::Measurements { measurements }).await;
 }
 
-pub async fn select(pin: u8) {
-    INBOX.send(Message::Select { pin }).await;
-}
-
 #[embassy_executor::task]
 pub async fn task(mut config: Config) {
     network::wait_for_network().await;
-    embassy_time::Timer::after_secs(1).await;
 
     config.reset.set_level(Level::High);
     let device = ExclusiveDevice::new(config.spi0, config.cs, Delay);
     let display = SPIInterface::new(device, config.d_c);
 
-    let mut graphics = device::Display::build(display).await.unwrap();
-    let mut screen = screen::Screen::build(graphics).unwrap();
+    let device = match Device::build(display, DisplaySize128x64).await {
+        Ok(device) => device,
+        Err(error) => {
+            log::info!("display: device initialization failed {:?}", error);
+            return;
+        }
+    };
+
+    let mut screen = Screen::new(device);
+
+    let mut measurements = [0_u8; NUM_PINS];
 
     // TODO send to self
-    // process messages
-    // Screen is five lines of fixed size string<16> plus type: none, offon, onoff, number, idx
-    // stack of 3 screens
-    // redraw topmost screen
-
     screen.add_line("Water tank", screen::Value::None);
-    screen.add_line("Something 1", screen::Value::Number(42));
-    screen.add_line("Something 2", screen::Value::Number(100));
-    screen.add_line("Valve 3", screen::Value::OffOn(100));
-    screen.add_line("Valve 4", screen::Value::OnOff(100));
-    screen.draw().await;
-
-    // let mut selection = None;
-    // let mut measurements = [0_u8; NUM_PINS];
+    screen.add_line("Pump", screen::Value::Number(26));
+    screen.add_line("Fill level", screen::Value::Number(27));
+    screen.add_line("Fire", screen::Value::OnOff(19));
+    screen.draw(&measurements).await;
 
     loop {
-        embassy_time::Timer::after_secs(1).await;
-        // log::info!("loop");
-        /*
-                match INBOX.receive().await {
-                    Message::Select { pin } => {
-                        selection = if pin as usize >= NUM_PINS {
-                            None
-                        } else {
-                            Some(pin)
-                        };
-                    }
-                    Message::Measurements {
-                        measurements: new_values,
-                    } => {
-                        measurements = new_values;
-                    }
-                }
-        */
+        match INBOX.receive().await {
+            Message::Measurements {
+                measurements: new_values,
+            } => {
+                measurements = new_values;
+                screen.draw(&measurements).await;
+            }
+        }
     }
 }
 
 /// The bar graph is powered by an 8-bit shift register of type 74HC595.
 pub struct Config {
-    /// The SPI0 interface.
-    /// Async embassy tasks cannot be accept a template argument.
+    /// The SPI0 interface. Fixed to SPI0 because async
+    /// embassy tasks cannot accept template arguments.
     pub spi0: Spi<'static, SPI0, Async>,
     /// The latch to update the register, called "RCLK" in the datasheet.
     pub reset: Output<'static>,

@@ -19,7 +19,6 @@ async fn main() {
         &PingPong,
         &SetDigitalOut,
         &SetAnalogOut,
-        &SelectBarGraph,
         &StartBangBang,
         &StopBangBang,
         &SetBangBangInput,
@@ -167,26 +166,6 @@ impl Instruction for SetAnalogOut {
             Err(error) => return Err(error.to_string()),
         };
         Ok(Command::SetAO { pin, value })
-    }
-}
-
-struct SelectBarGraph;
-
-impl Instruction for SelectBarGraph {
-    fn prefix(&self) -> Strings {
-        &["bar_graph"]
-    }
-
-    fn arguments(&self) -> Strings {
-        &["PIN"]
-    }
-
-    fn run(&self, arguments: &[String]) -> Result<Command, String> {
-        let pin = match arguments[0].parse::<u8>() {
-            Ok(pin) => pin,
-            Err(error) => return Err(error.to_string()),
-        };
-        Ok(Command::BarGraph { pin })
     }
 }
 
