@@ -101,7 +101,7 @@ where
         let Device(target) = self;
         let row = row + 1;
 
-        let Ok(text) = format!(4; "{:3}%", number) else {
+        let Ok(text) = format!(4; "{:4}", number) else {
             return;
         };
 

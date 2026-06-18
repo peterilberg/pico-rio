@@ -1,7 +1,8 @@
-use messages::{Command, Info};
+use messages::{Command, Info, Value};
 use std::env::Args;
 use std::time::Duration;
 
+use heapless;
 use tools::instruction::{Instruction, Match, Strings, find_instruction};
 use tools::network::{Buffer, Socket, parse_address};
 
@@ -25,6 +26,14 @@ async fn main() {
         &SetBangBangOutput,
         &SetBangBangLowerLimit,
         &SetBangBangUpperLimit,
+        &ShowBangBang,
+        &HideBangBang,
+        &ClearDisplay,
+        &DisplayText,
+        &DisplayAnalog,
+        &DisplayOffOn,
+        &DisplayOnOff,
+        &ExampleWaterTank,
     ];
 
     match find_instruction(&instructions, &command) {
@@ -90,20 +99,22 @@ async fn process_instruction(
 ) -> Result<(), String> {
     let first_argument = instruction.prefix().len();
     let arguments = &command[first_argument..];
-    let command = instruction.run(arguments)?;
-
-    let mut buffer = Buffer::new();
-    buffer.encode(&command)?;
+    let commands = instruction.run(arguments)?;
 
     let destination = parse_address(destination)?;
     let socket = Socket::bind(destination.port()).await?;
-    socket.send(destination, &buffer).await?;
 
-    if let Command::Ping = command {
-        let wait = Duration::from_secs(3);
-        let sender = socket.recv(&mut buffer, wait).await?;
-        let Info { content, .. } = buffer.decode::<Info>()?;
-        println!("{}: {:?}", sender, content);
+    for command in commands {
+        let mut buffer = Buffer::new();
+        buffer.encode(&command)?;
+        socket.send(destination, &buffer).await?;
+
+        if let Command::Ping = command {
+            let wait = Duration::from_secs(3);
+            let sender = socket.recv(&mut buffer, wait).await?;
+            let Info { content, .. } = buffer.decode::<Info>()?;
+            println!("{}: {:?}", sender, content);
+        }
     }
     Ok(())
 }
@@ -119,8 +130,8 @@ impl Instruction for PingPong {
         &[]
     }
 
-    fn run(&self, _arguments: &[String]) -> Result<Command, String> {
-        Ok(Command::Ping)
+    fn run(&self, _arguments: &[String]) -> Result<Vec<Command>, String> {
+        Ok(vec![Command::Ping])
     }
 }
 
@@ -135,13 +146,10 @@ impl Instruction for SetDigitalOut {
         &["PIN", "on|off"]
     }
 
-    fn run(&self, arguments: &[String]) -> Result<Command, String> {
-        let pin = match arguments[0].parse::<u8>() {
-            Ok(pin) => pin,
-            Err(error) => return Err(error.to_string()),
-        };
-        let value = matches!(&*arguments[1], "on");
-        Ok(Command::SetDO { pin, value })
+    fn run(&self, arguments: &[String]) -> Result<Vec<Command>, String> {
+        let pin = get_pin(&arguments[0])?;
+        let value = get_on_off(&arguments[1])?;
+        Ok(vec![Command::SetDO { pin, value }])
     }
 }
 
@@ -156,16 +164,10 @@ impl Instruction for SetAnalogOut {
         &["PIN", "0-100"]
     }
 
-    fn run(&self, arguments: &[String]) -> Result<Command, String> {
-        let pin = match arguments[0].parse::<u8>() {
-            Ok(pin) => pin,
-            Err(error) => return Err(error.to_string()),
-        };
-        let value = match arguments[1].parse::<u8>() {
-            Ok(value) => value,
-            Err(error) => return Err(error.to_string()),
-        };
-        Ok(Command::SetAO { pin, value })
+    fn run(&self, arguments: &[String]) -> Result<Vec<Command>, String> {
+        let pin = get_pin(&arguments[0])?;
+        let value = get_number(&arguments[1])?;
+        Ok(vec![Command::SetAO { pin, value }])
     }
 }
 
@@ -173,15 +175,15 @@ struct StartBangBang;
 
 impl Instruction for StartBangBang {
     fn prefix(&self) -> Strings {
-        &["bang_bang", "start"]
+        &["bang", "bang", "start"]
     }
 
     fn arguments(&self) -> Strings {
         &[]
     }
 
-    fn run(&self, _arguments: &[String]) -> Result<Command, String> {
-        Ok(Command::BangBangStart)
+    fn run(&self, _arguments: &[String]) -> Result<Vec<Command>, String> {
+        Ok(vec![Command::BangBangStart])
     }
 }
 
@@ -189,15 +191,15 @@ struct StopBangBang;
 
 impl Instruction for StopBangBang {
     fn prefix(&self) -> Strings {
-        &["bang_bang", "stop"]
+        &["bang", "bang", "stop"]
     }
 
     fn arguments(&self) -> Strings {
         &[]
     }
 
-    fn run(&self, _arguments: &[String]) -> Result<Command, String> {
-        Ok(Command::BangBangStop)
+    fn run(&self, _arguments: &[String]) -> Result<Vec<Command>, String> {
+        Ok(vec![Command::BangBangStop])
     }
 }
 
@@ -205,19 +207,16 @@ struct SetBangBangInput;
 
 impl Instruction for SetBangBangInput {
     fn prefix(&self) -> Strings {
-        &["bang_bang", "input"]
+        &["bang", "bang", "input"]
     }
 
     fn arguments(&self) -> Strings {
         &["PIN"]
     }
 
-    fn run(&self, arguments: &[String]) -> Result<Command, String> {
-        let pin = match arguments[0].parse::<u8>() {
-            Ok(pin) => pin,
-            Err(error) => return Err(error.to_string()),
-        };
-        Ok(Command::BangBangInput { pin })
+    fn run(&self, arguments: &[String]) -> Result<Vec<Command>, String> {
+        let pin = get_pin(&arguments[0])?;
+        Ok(vec![Command::BangBangInput { pin }])
     }
 }
 
@@ -225,19 +224,16 @@ struct SetBangBangOutput;
 
 impl Instruction for SetBangBangOutput {
     fn prefix(&self) -> Strings {
-        &["bang_bang", "output"]
+        &["bang", "bang", "output"]
     }
 
     fn arguments(&self) -> Strings {
         &["PIN"]
     }
 
-    fn run(&self, arguments: &[String]) -> Result<Command, String> {
-        let pin = match arguments[0].parse::<u8>() {
-            Ok(pin) => pin,
-            Err(error) => return Err(error.to_string()),
-        };
-        Ok(Command::BangBangOutput { pin })
+    fn run(&self, arguments: &[String]) -> Result<Vec<Command>, String> {
+        let pin = get_pin(&arguments[0])?;
+        Ok(vec![Command::BangBangOutput { pin }])
     }
 }
 
@@ -245,19 +241,16 @@ struct SetBangBangLowerLimit;
 
 impl Instruction for SetBangBangLowerLimit {
     fn prefix(&self) -> Strings {
-        &["bang_bang", "lower"]
+        &["bang", "bang", "lower"]
     }
 
     fn arguments(&self) -> Strings {
         &["0-100"]
     }
 
-    fn run(&self, arguments: &[String]) -> Result<Command, String> {
-        let value = match arguments[0].parse::<u8>() {
-            Ok(pin) => pin,
-            Err(error) => return Err(error.to_string()),
-        };
-        Ok(Command::BangBangLowerLimit { value })
+    fn run(&self, arguments: &[String]) -> Result<Vec<Command>, String> {
+        let value = get_number(&arguments[0])?;
+        Ok(vec![Command::BangBangLowerLimit { value }])
     }
 }
 
@@ -265,18 +258,205 @@ struct SetBangBangUpperLimit;
 
 impl Instruction for SetBangBangUpperLimit {
     fn prefix(&self) -> Strings {
-        &["bang_bang", "upper"]
+        &["bang", "bang", "upper"]
     }
 
     fn arguments(&self) -> Strings {
         &["0-100"]
     }
 
-    fn run(&self, arguments: &[String]) -> Result<Command, String> {
-        let value = match arguments[0].parse::<u8>() {
-            Ok(pin) => pin,
-            Err(error) => return Err(error.to_string()),
-        };
-        Ok(Command::BangBangUpperLimit { value })
+    fn run(&self, arguments: &[String]) -> Result<Vec<Command>, String> {
+        let value = get_number(&arguments[0])?;
+        Ok(vec![Command::BangBangUpperLimit { value }])
+    }
+}
+
+struct ShowBangBang;
+
+impl Instruction for ShowBangBang {
+    fn prefix(&self) -> Strings {
+        &["bang", "bang", "show"]
+    }
+
+    fn arguments(&self) -> Strings {
+        &[]
+    }
+
+    fn run(&self, _arguments: &[String]) -> Result<Vec<Command>, String> {
+        Ok(vec![Command::BangBangShow])
+    }
+}
+
+struct HideBangBang;
+
+impl Instruction for HideBangBang {
+    fn prefix(&self) -> Strings {
+        &["bang", "bang", "hide"]
+    }
+
+    fn arguments(&self) -> Strings {
+        &[]
+    }
+
+    fn run(&self, _arguments: &[String]) -> Result<Vec<Command>, String> {
+        Ok(vec![Command::BangBangHide])
+    }
+}
+
+struct ClearDisplay;
+
+impl Instruction for ClearDisplay {
+    fn prefix(&self) -> Strings {
+        &["clear", "display"]
+    }
+
+    fn arguments(&self) -> Strings {
+        &[]
+    }
+
+    fn run(&self, _arguments: &[String]) -> Result<Vec<Command>, String> {
+        Ok(vec![Command::ClearDisplay])
+    }
+}
+struct DisplayText;
+
+impl Instruction for DisplayText {
+    fn prefix(&self) -> Strings {
+        &["display", "label"]
+    }
+
+    fn arguments(&self) -> Strings {
+        &["LABEL"]
+    }
+
+    fn run(&self, arguments: &[String]) -> Result<Vec<Command>, String> {
+        let label = get_label(&arguments[0])?;
+        Ok(vec![Command::AddLine {
+            label,
+            value: Value::None,
+        }])
+    }
+}
+
+struct DisplayAnalog;
+
+impl Instruction for DisplayAnalog {
+    fn prefix(&self) -> Strings {
+        &["display", "analog"]
+    }
+
+    fn arguments(&self) -> Strings {
+        &["LABEL", "PIN"]
+    }
+
+    fn run(&self, arguments: &[String]) -> Result<Vec<Command>, String> {
+        let label = get_label(&arguments[0])?;
+        let pin = get_pin(&arguments[1])?;
+        Ok(vec![Command::AddLine {
+            label,
+            value: Value::Analog(pin),
+        }])
+    }
+}
+
+struct DisplayOffOn;
+
+impl Instruction for DisplayOffOn {
+    fn prefix(&self) -> Strings {
+        &["display", "off_on"]
+    }
+
+    fn arguments(&self) -> Strings {
+        &["LABEL", "PIN"]
+    }
+
+    fn run(&self, arguments: &[String]) -> Result<Vec<Command>, String> {
+        let label = get_label(&arguments[0])?;
+        let pin = get_pin(&arguments[1])?;
+        Ok(vec![Command::AddLine {
+            label,
+            value: Value::OffOn(pin),
+        }])
+    }
+}
+
+struct DisplayOnOff;
+
+impl Instruction for DisplayOnOff {
+    fn prefix(&self) -> Strings {
+        &["display", "on_off"]
+    }
+
+    fn arguments(&self) -> Strings {
+        &["LABEL", "PIN"]
+    }
+
+    fn run(&self, arguments: &[String]) -> Result<Vec<Command>, String> {
+        let label = get_label(&arguments[0])?;
+        let pin = get_pin(&arguments[1])?;
+        Ok(vec![Command::AddLine {
+            label,
+            value: Value::OnOff(pin),
+        }])
+    }
+}
+
+struct ExampleWaterTank;
+
+impl Instruction for ExampleWaterTank {
+    fn prefix(&self) -> Strings {
+        &["example", "water", "tank"]
+    }
+
+    fn arguments(&self) -> Strings {
+        &[]
+    }
+
+    fn run(&self, _arguments: &[String]) -> Result<Vec<Command>, String> {
+        Ok(vec![
+            Command::ClearDisplay,
+            add_line("Water tank", Value::None),
+            add_line("Pump", Value::Analog(26)),
+            add_line("Fill level", Value::Analog(27)),
+            add_line("Source (NC)", Value::OffOn(20)),
+            add_line("Drain  (NO)", Value::OnOff(19)),
+            Command::BangBangInput { pin: 27 },
+            Command::BangBangOutput { pin: 6 },
+            Command::BangBangLowerLimit { value: 45 },
+            Command::BangBangUpperLimit { value: 50 },
+        ])
+    }
+}
+
+fn add_line(label: &str, value: Value) -> Command {
+    let label = match heapless::String::<16>::try_from(label) {
+        Ok(string) => string,
+        Err(_) => heapless::String::new(),
+    };
+    Command::AddLine { label, value }
+}
+
+fn get_pin(argument: &String) -> Result<u8, String> {
+    match argument.parse::<u8>() {
+        Ok(pin) => Ok(pin),
+        Err(error) => Err(format!("invalid pin: {}", error)),
+    }
+}
+
+fn get_on_off(argument: &String) -> Result<bool, String> {
+    Ok(matches!(argument.as_str(), "on"))
+}
+
+fn get_number(argument: &String) -> Result<u8, String> {
+    match argument.parse::<u8>() {
+        Ok(pin) => Ok(pin),
+        Err(error) => Err(format!("invalid number: {}", error)),
+    }
+}
+
+fn get_label(argument: &String) -> Result<heapless::String<16>, String> {
+    match heapless::String::<16>::try_from(argument.as_str()) {
+        Ok(string) => Ok(string),
+        Err(error) => return Err(format!("invalid label: {}", error)),
     }
 }

@@ -6,7 +6,7 @@ pub type Strings = &'static [&'static str];
 pub trait Instruction {
     fn prefix(&self) -> Strings;
     fn arguments(&self) -> Strings;
-    fn run(&self, arguments: &[String]) -> Result<Command, String>;
+    fn run(&self, arguments: &[String]) -> Result<Vec<Command>, String>;
 }
 
 pub enum Match<'i> {

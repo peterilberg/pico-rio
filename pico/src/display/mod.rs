@@ -6,27 +6,56 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
 use embassy_time::Delay;
 use embedded_hal_bus::spi::ExclusiveDevice;
+use heapless::String;
 use ssd1306::size::DisplaySize128x64;
 use {defmt_rtt as _, panic_probe as _};
+
+use messages::Value;
 
 use crate::display::device::Device;
 use crate::display::screen::Screen;
 use crate::measurements::Measurements;
 use crate::network;
-use messages::NUM_PINS;
 
 mod device;
 mod screen;
 
 enum Message {
     Measurements { measurements: Measurements },
+
+    Clear,
+    AddLine { label: String<16>, value: Value },
+    Refresh,
+
+    AddPage,
+    RemovePage,
 }
 
-static INBOX: Channel<CriticalSectionRawMutex, Message, 16> = Channel::new();
+static INBOX: Channel<CriticalSectionRawMutex, Message, 32> = Channel::new();
 
 pub async fn notify(measurements: &Measurements) {
     let measurements = *measurements;
     INBOX.send(Message::Measurements { measurements }).await;
+}
+
+pub async fn clear() {
+    INBOX.send(Message::Clear).await;
+}
+
+pub async fn add_line(label: String<16>, value: Value) {
+    INBOX.send(Message::AddLine { label, value }).await;
+}
+
+pub async fn refresh() {
+    INBOX.send(Message::Refresh).await;
+}
+
+pub async fn add_page() {
+    INBOX.send(Message::AddPage).await;
+}
+
+pub async fn remove_page() {
+    INBOX.send(Message::RemovePage).await;
 }
 
 #[embassy_executor::task]
@@ -46,15 +75,7 @@ pub async fn task(mut config: Config) {
     };
 
     let mut screen = Screen::new(device);
-
-    let mut measurements = [0_u8; NUM_PINS];
-
-    // TODO send to self
-    screen.add_line("Water tank", screen::Value::None);
-    screen.add_line("Pump", screen::Value::Number(26));
-    screen.add_line("Fill level", screen::Value::Number(27));
-    screen.add_line("Fire", screen::Value::OnOff(19));
-    screen.draw(&measurements).await;
+    let mut measurements = Measurements::default();
 
     loop {
         match INBOX.receive().await {
@@ -63,6 +84,21 @@ pub async fn task(mut config: Config) {
             } => {
                 measurements = new_values;
                 screen.draw(&measurements).await;
+            }
+            Message::Clear => {
+                screen.clear();
+            }
+            Message::AddLine { label, value } => {
+                screen.add_line(label, value);
+            }
+            Message::Refresh => {
+                screen.draw(&measurements).await;
+            }
+            Message::AddPage => {
+                screen.push_page();
+            }
+            Message::RemovePage => {
+                screen.pop_page();
             }
         }
     }

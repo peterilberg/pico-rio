@@ -8,8 +8,8 @@ use {defmt_rtt as _, panic_probe as _};
 
 use crate::analog_out;
 use crate::bang_bang;
-// use crate::bar_graph;
 use crate::digital_out;
+use crate::display;
 use crate::network::{self, SocketBuffers};
 
 #[embassy_executor::task]
@@ -30,6 +30,15 @@ pub async fn task(stack: network::NetworkStack, port: u16) {
             Command::Ping => {
                 ping_pong(&socket, endpoint).await;
             }
+            Command::Restart => {
+                todo!("not implemented yet");
+            }
+            Command::Subscribe => {
+                todo!("not implemented yet");
+            }
+            Command::Unsubscribe => {
+                todo!("not implemented yet");
+            }
             Command::SetDO { pin, value } => {
                 digital_out::set_pin(pin, value).await;
             }
@@ -42,7 +51,6 @@ pub async fn task(stack: network::NetworkStack, port: u16) {
             Command::BangBangStop => {
                 bang_bang::stop().await;
             }
-
             Command::BangBangInput { pin } => {
                 bang_bang::set_input(pin).await;
             }
@@ -55,8 +63,17 @@ pub async fn task(stack: network::NetworkStack, port: u16) {
             Command::BangBangUpperLimit { value } => {
                 bang_bang::set_upper_limit(value).await;
             }
-            command => {
-                log::info!("inbound: ignored command {:?}", command);
+            Command::BangBangShow => {
+                bang_bang::show().await;
+            }
+            Command::BangBangHide => {
+                bang_bang::hide().await;
+            }
+            Command::ClearDisplay => {
+                display::clear().await;
+            }
+            Command::AddLine { label, value } => {
+                display::add_line(label, value).await;
             }
         }
     }

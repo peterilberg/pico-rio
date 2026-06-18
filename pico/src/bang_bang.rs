@@ -2,10 +2,12 @@ use embassy_futures::select::{Either, select};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
 use embassy_time::Duration;
-use messages::{BangBang, Content, Diagnostics, Mode, NUM_PINS};
+use heapless::String;
+use messages::{BangBang, Content, Diagnostics, Mode, Value};
 use {defmt_rtt as _, panic_probe as _};
 
 use crate::analog_out;
+use crate::display;
 use crate::measurements::Measurements;
 use crate::network;
 use crate::outbound;
@@ -21,6 +23,9 @@ enum Message {
 
     SetLowerLimit { value: u8 },
     SetUpperLimit { value: u8 },
+
+    Show,
+    Hide,
 
     Measurements { measurements: Measurements },
 }
@@ -56,6 +61,14 @@ pub async fn set_upper_limit(value: u8) {
     INBOX.send(Message::SetUpperLimit { value }).await;
 }
 
+pub async fn show() {
+    INBOX.send(Message::Show).await;
+}
+
+pub async fn hide() {
+    INBOX.send(Message::Hide).await;
+}
+
 #[embassy_executor::task]
 pub async fn task(interval: Duration) {
     network::wait_for_network().await;
@@ -67,7 +80,8 @@ pub async fn task(interval: Duration) {
         lower_limit: 0,
         upper_limit: 0,
     };
-    let mut measurements = [0_u8; NUM_PINS];
+    let mut measurements = Measurements::default();
+    let mut visible = false;
 
     let mut timer = Timer::new(interval);
     loop {
@@ -79,10 +93,16 @@ pub async fn task(interval: Duration) {
             }
             Either::Second(Message::Start) => {
                 settings.mode = Mode::Running;
+                if visible {
+                    update_display(&settings).await;
+                }
             }
             Either::Second(Message::Stop) => {
                 analog_out::set_pin(settings.output, 0).await;
                 settings.mode = Mode::Off;
+                if visible {
+                    update_display(&settings).await;
+                }
             }
             Either::Second(Message::SetInput { pin }) => {
                 settings.input = pin;
@@ -92,14 +112,29 @@ pub async fn task(interval: Duration) {
             }
             Either::Second(Message::SetLowerLimit { value }) => {
                 settings.lower_limit = value;
+                if visible {
+                    update_display(&settings).await;
+                }
             }
             Either::Second(Message::SetUpperLimit { value }) => {
                 settings.upper_limit = value;
+                if visible {
+                    update_display(&settings).await;
+                }
             }
             Either::Second(Message::Measurements {
                 measurements: new_values,
             }) => {
                 measurements = new_values;
+            }
+            Either::Second(Message::Show) => {
+                display::add_page().await;
+                update_display(&settings).await;
+                visible = true;
+            }
+            Either::Second(Message::Hide) => {
+                display::remove_page().await;
+                visible = false;
             }
         }
 
@@ -138,5 +173,24 @@ async fn run(settings: &mut BangBang, measurements: &Measurements) {
                 settings.mode = Mode::Running;
             }
         }
+    }
+}
+
+async fn update_display(settings: &BangBang) {
+    let enabled = settings.mode != Mode::Off;
+
+    display::clear().await;
+    display::add_line(label("Controller"), Value::Boolean(enabled)).await;
+    display::add_line(label("Output"), Value::Analog(settings.output)).await;
+    display::add_line(label("Upper limit"), Value::Number(settings.upper_limit)).await;
+    display::add_line(label("Input"), Value::Analog(settings.input)).await;
+    display::add_line(label("Lower limit"), Value::Number(settings.lower_limit)).await;
+    display::refresh().await;
+}
+
+fn label(label: &str) -> String<16> {
+    match String::try_from(label) {
+        Ok(string) => string,
+        Err(_) => String::new(),
     }
 }

@@ -1,5 +1,6 @@
 #![no_std]
 
+use heapless::String;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq)]
@@ -21,6 +22,12 @@ pub enum Command {
 
     BangBangLowerLimit { value: u8 },
     BangBangUpperLimit { value: u8 },
+
+    BangBangShow,
+    BangBangHide,
+
+    ClearDisplay,
+    AddLine { label: String<16>, value: Value },
 }
 
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq)]
@@ -62,6 +69,16 @@ pub struct BangBang {
     pub output: u8,
     pub lower_limit: u8,
     pub upper_limit: u8,
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug)]
+pub enum Value {
+    None,
+    OffOn(u8),
+    OnOff(u8),
+    Analog(u8),
+    Number(u8),
+    Boolean(bool),
 }
 
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq)]

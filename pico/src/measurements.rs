@@ -25,7 +25,7 @@ pub async fn set_digital(pins: &[(u8, bool)]) {
 pub async fn task() {
     network::wait_for_network().await;
 
-    let mut measurements = [0_u8; NUM_PINS];
+    let mut measurements = Measurements::default();
 
     loop {
         let updates = INBOX.receive().await;

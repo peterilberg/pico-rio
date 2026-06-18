@@ -4,19 +4,13 @@ use heapless::{String, Vec};
 use ssd1306::size::DisplaySizeAsync;
 use {defmt_rtt as _, panic_probe as _};
 
+use messages::Value;
+
 use crate::display::device::Device;
 use crate::measurements::Measurements;
 
-#[derive(PartialEq)]
-pub enum Value {
-    None,
-    OffOn(u8),
-    OnOff(u8),
-    Number(u8),
-}
-
 struct Line {
-    text: String<16>,
+    label: String<16>,
     value: Value,
 }
 
@@ -54,18 +48,21 @@ where
         self.pages.pop();
     }
 
-    pub fn add_line(&mut self, text: &str, value: Value) {
+    pub fn add_line(&mut self, label: String<16>, value: Value) {
         let Some(page) = self.pages.last_mut() else {
             return;
         };
-        let Ok(text) = String::try_from(text) else {
-            return;
-        };
-
         let _ = page.lines.push(Line {
-            text: text,
+            label: label,
             value: value,
         });
+    }
+
+    pub fn clear(&mut self) {
+        let Some(page) = self.pages.last_mut() else {
+            return;
+        };
+        page.lines.clear();
     }
 
     pub async fn draw(&mut self, measurements: &Measurements)
@@ -82,13 +79,15 @@ where
         };
 
         for (row, line) in (0..).zip(page.lines.iter()) {
-            device.draw_text(row, line.text.as_str());
+            device.draw_text(row, line.label.as_str());
 
             match line.value {
                 Value::None => {}
                 Value::OffOn(pin) => device.draw_off_on(row, measurements[pin as usize] != 0),
                 Value::OnOff(pin) => device.draw_off_on(row, measurements[pin as usize] == 0),
-                Value::Number(pin) => device.draw_number(row, measurements[pin as usize]),
+                Value::Analog(pin) => device.draw_number(row, measurements[pin as usize]),
+                Value::Number(n) => device.draw_number(row, n),
+                Value::Boolean(b) => device.draw_off_on(row, b),
             }
         }
         device.refresh().await;
