@@ -98,46 +98,88 @@ analog PIN 0-100
 Set the duty cycle of the PWM on `PIN` to a value in the range 0 to 100.
 
 ```
-bar_graph PIN
-```
-
-Show the value of `PIN` on the LED bar. Analog values from 0 to 100 are scaled to 0 to 8 LEDs. Digital values light up either no LEDs (`off`) or all LEDs (`on`).
-
-```
-bang_bang start
+bang bang start
 ```
 
 Start the bang-bang controller.
 
 ```
-bang_bang stop
+bang bang stop
 ```
 
 Stop the bang-bang controller.
 
 ```
-bang_bang input PIN
+bang bang input PIN
 ```
 
 Set the input `PIN` of the bang-bang controller.
 
 ```
-bang_bang output PIN
+bang bang output PIN
 ```
 
 Set the output `PIN` of the bang-bang controller.
 
 ```
-bang_bang lower 0-100
+bang bang lower 0-100
 ```
 
 Set the lower bound of the bang-bang controller to a value in the range 0 to 100.
 
 ```
-bang_bang upper 0-100
+bang bang upper 0-100
 ```
 
 Set the upper bound of the bang-bang controller to a value in the range 0 to 100.
+
+```
+brang bang show
+```
+
+Show the current configuration of the bang bang controller in the OLED display.
+
+```
+brang bang hide
+```
+
+Return to the previously displayed information in the OLED display.
+
+```
+clear display
+```
+
+Clear the OLED display.
+
+```
+display label LABEL
+```
+
+Display a text label on the next line of the OLED display.
+
+```
+display analog LABEL PIN
+```
+
+Display the current value of PIN as an analog value with description LABEL.
+
+```
+display off_on LABEL PIN
+```
+
+Display the current value of PIN as an boolean value with description LABEL.
+
+```
+display on_off LABEL PIN
+```
+
+Display the current value of PIN as an inverted boolean value with description LABEL.
+
+```
+example water tank
+```
+
+Configure the system for the example "water tank" [application](#application).
 
 ## System architecture
 
@@ -171,7 +213,7 @@ All network communication for the application, commands and messages, goes throu
 | Measurements | `analog_out` | 6, 8 | Sets analog output pins with the built-in PWM and reports their levels. |
 | Measurements | `measurements` | | Collects the current values of all input and output pins. |
 | Control | `bang_bang` | | Implements a simple bang-bang controller. When input is<br/>- below the upper limit, turn on the output.<br/>- above the upper limit, turn off the output.<br/>- falls below the upper limit, wait until it hits the lower limit.<br/>- falls below the lower limit, turn on the output again.<br/>The output is proportional to the different between the input and the upper limit. |
-| Debugging | `bar_graph` | 2 (clock), 3 (latch), 4 (data) | Shows one of the current `measurements` in an LED bar with eight LEDs. The LED bar is driven by a 74HC595 shift register with control pins `clock`, `latch`, and `data`. |
+| Display | `display` | 0 (nRES), 1 (D/C), 2 (CLK), 3 (DIN), 5 (nCS) | Shows system information in the OLED display. The OLED display is driven by SPI 0. |
 
 ## Application
 
@@ -185,20 +227,20 @@ Water enters the system from the `source`. The `pump` pumps the waters into the 
 
 ### Prototype circuit
 
-The prototyping circuit simulates actuators and sensors with LEDs, buttons, and variable resistors.
+The prototyping circuit simulates actuators and sensors with wires, buttons, and variable resistors.
 
-| Item | Kind | Function | Circuit | Pin |
+| Item | Kind | Function | Circuit | Pin on Raspberry Pi Pico |
 |-|-|-|-|-|
 | Tank | Tank | The water tank. | - | - |
 | Source | Source | The water source. | - | - |
 | Drain | Drain | The water drain. | - | - |
 | Pump | Actuator | Pumps water from source to tank. | PWM signal with duty-cycle 0 to 100. | 6 |
-| Source valve | Actuator | Normally closed valve controls flow from source to tank. | Red LED. On when valve is open. | Set 10, Feedback 20 |
-| Drain valve | Actuator | Normally open valve controls flow from tank to drain. | Yellow LED. On when valve is open. | Set 11, Feedback 21 |
-| Pump speed | Sensor | Measures speed of pump. | Low-pass filter from PWM to voltage. Range 0 to 100. | 26 (ADC_0) |
-| Fill level | Sensor | Measures fill level of tank. | Manually controlled variable resistor. | 27 (ADC_1) |
-| Emergency | Sensor | Detects emergency, for example, when tank is too full. | Push button. Pulls down when pressed. | 19 |
-| - | Display | Shows measurements in bar graph. | LED bar of 8 LEDs. | Clock 2, latch 3, data 4 |
+| Source valve | Actuator | Normally closed valve controls flow from source to tank. | Feedback wired to actuator. | Actuator 11, Feedback 20 |
+| Drain valve | Actuator | Normally open valve controls flow from tank to drain. | Feedback wired to actuator. | Actuator 12, Feedback 19 |
+| Pump speed | Sensor | Measures speed of pump. | Low-pass filter on PWM signal. Range 0 to 100. | 26 (ADC_0) |
+| Fill level | Sensor | Measures fill level of tank. | Manually controlled variable resistor. Range 0 to 100. | 27 (ADC_1) |
+| Emergency | Sensor | Detects emergency, for example, when tank is too full. | Push button. Pulls down when pressed. | 21 |
+| - | Display | Shows system information. | OLED display. | nRES 0, D/C 1, CLK 2, DIN 3, nCS 5 |
 
 ![Circuit diagram](assets/circuit.svg)
 
@@ -210,13 +252,9 @@ The prototyping circuit simulates actuators and sensors with LEDs, buttons, and 
 
 | Reference | Quantity | Description      | Datasheet |
 |-----------|----------|------------------|-----------|
-| BAR1      | 1        | LED bar        | [Datasheet](https://docs.broadcom.com/docs/AV02-1798EN) |
-| U1        | 1        | Raspberry Pi Pico | [Datasheet](https://datasheets.raspberrypi.com/pico/pico-datasheet.pdf) |
+| U1 | 1 | Raspberry Pi Pico | [Datasheet](https://datasheets.raspberrypi.com/pico/pico-datasheet.pdf) |
 | C1 | 1 | 4.7u |  |
-| D1 | 1 | Red LED |  |
-| D2 | 1 | Yellow LED |  |
 | R1,R2 | 2 | 10k |  |
-| R3-R12 | 10 | 330 |  |
 | RV1 | 1 | 10k linear variable resistor |  |
 | SW1 | 1 | Push button |  |
-| U2 | 1 | 74HC595 | [Datasheet](http://www.ti.com/lit/ds/symlink/sn74hc595.pdf) |
+| OLED1 | 1 | ssd1306-driven OLED | |
