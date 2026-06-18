@@ -93,16 +93,12 @@ pub async fn task(interval: Duration) {
             }
             Either::Second(Message::Start) => {
                 settings.mode = Mode::Running;
-                if visible {
-                    update_display(&settings).await;
-                }
+                update_display(&settings, visible).await;
             }
             Either::Second(Message::Stop) => {
                 analog_out::set_pin(settings.output, 0).await;
                 settings.mode = Mode::Off;
-                if visible {
-                    update_display(&settings).await;
-                }
+                update_display(&settings, visible).await;
             }
             Either::Second(Message::SetInput { pin }) => {
                 settings.input = pin;
@@ -112,15 +108,11 @@ pub async fn task(interval: Duration) {
             }
             Either::Second(Message::SetLowerLimit { value }) => {
                 settings.lower_limit = value;
-                if visible {
-                    update_display(&settings).await;
-                }
+                update_display(&settings, visible).await;
             }
             Either::Second(Message::SetUpperLimit { value }) => {
                 settings.upper_limit = value;
-                if visible {
-                    update_display(&settings).await;
-                }
+                update_display(&settings, visible).await;
             }
             Either::Second(Message::Measurements {
                 measurements: new_values,
@@ -129,8 +121,8 @@ pub async fn task(interval: Duration) {
             }
             Either::Second(Message::Show) => {
                 display::add_page().await;
-                update_display(&settings).await;
                 visible = true;
+                update_display(&settings, visible).await;
             }
             Either::Second(Message::Hide) => {
                 display::remove_page().await;
@@ -176,7 +168,11 @@ async fn run(settings: &mut BangBang, measurements: &Measurements) {
     }
 }
 
-async fn update_display(settings: &BangBang) {
+async fn update_display(settings: &BangBang, visible: bool) {
+    if !visible {
+        return;
+    }
+
     let enabled = settings.mode != Mode::Off;
 
     display::clear().await;

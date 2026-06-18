@@ -363,7 +363,7 @@ struct DisplayOffOn;
 
 impl Instruction for DisplayOffOn {
     fn prefix(&self) -> Strings {
-        &["display", "off_on"]
+        &["display", "off", "on"]
     }
 
     fn arguments(&self) -> Strings {
@@ -384,7 +384,7 @@ struct DisplayOnOff;
 
 impl Instruction for DisplayOnOff {
     fn prefix(&self) -> Strings {
-        &["display", "on_off"]
+        &["display", "on", "off"]
     }
 
     fn arguments(&self) -> Strings {
