@@ -83,7 +83,7 @@
         <mxCell id="xubCBRTcwV1AIBbsZQKh-7" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="measurements" vertex="1">
           <mxGeometry height="40" width="120" x="320" y="202" as="geometry" />
         </mxCell>
-        <mxCell id="xubCBRTcwV1AIBbsZQKh-8" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="bar_graph" vertex="1">
+        <mxCell id="xubCBRTcwV1AIBbsZQKh-8" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="display" vertex="1">
           <mxGeometry height="40" width="120" x="520" y="162" as="geometry" />
         </mxCell>
         <mxCell id="xubCBRTcwV1AIBbsZQKh-39" edge="1" parent="1" source="xubCBRTcwV1AIBbsZQKh-9" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0;exitY=0.5;exitDx=0;exitDy=0;startArrow=classic;startFill=1;endArrow=none;endFill=0;">
@@ -98,6 +98,9 @@
               <mxPoint x="380" y="400" />
             </Array>
           </mxGeometry>
+        </mxCell>
+        <mxCell id="SnFClk5W-tLf7v8_O_Ug-1" edge="1" parent="1" source="xubCBRTcwV1AIBbsZQKh-9" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="xubCBRTcwV1AIBbsZQKh-8" value="">
+          <mxGeometry relative="1" as="geometry" />
         </mxCell>
         <mxCell id="xubCBRTcwV1AIBbsZQKh-9" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="bang_bang" vertex="1">
           <mxGeometry height="40" width="120" x="520" y="242" as="geometry" />
