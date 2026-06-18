@@ -8,10 +8,7 @@ use tools::network::{Buffer, Socket, parse_address};
 
 #[tokio::main]
 async fn main() {
-    let Config {
-        destination,
-        command,
-    } = Config::build(std::env::args()).unwrap_or_else(|error| {
+    let Config { command } = Config::build(std::env::args()).unwrap_or_else(|error| {
         eprintln!("error: {}", error);
         std::process::exit(1);
     });
@@ -38,7 +35,7 @@ async fn main() {
 
     match find_instruction(&instructions, &command) {
         Match::Full(instruction) => {
-            match process_instruction(instruction, &command, destination).await {
+            match process_instruction(instruction, &command).await {
                 Ok(_) => (),
                 Err(err) => println!("error: {}", err),
             };
@@ -53,7 +50,6 @@ async fn main() {
 }
 
 struct Config {
-    destination: String,
     command: Vec<String>,
 }
 
@@ -61,22 +57,22 @@ impl Config {
     fn build(mut arguments: Args) -> Result<Self, String> {
         arguments.next(); // ignore executable name
 
-        let destination = match arguments.next() {
-            Some(arg) => arg,
-            None => {
-                let message = String::from("missing destination:port");
-                return Self::error(message);
-            }
-        };
+        let command = arguments.collect::<Vec<_>>();
+        if command.len() == 0 {
+            Self::error("missing command".to_string())?;
+        }
 
-        Ok(Config {
-            destination,
-            command: arguments.collect(),
-        })
+        Ok(Config { command })
     }
 
     fn error(message: String) -> Result<Self, String> {
-        let usage = String::from("usage: destination:port COMMAND");
+        const USAGE: &str = "usage: COMMAND
+Use command 'help' to show available commands.
+
+Set environment variable PICO_ADDRESS to the address and port
+of your pico. By default: PICO_ADDRESS=192.168.7.1:1234";
+
+        let usage = String::from(USAGE);
         Err([message, usage].join("\n"))
     }
 }
@@ -95,11 +91,15 @@ fn list_instructions(instructions: &[&'static dyn Instruction]) {
 async fn process_instruction(
     instruction: &'static dyn Instruction,
     command: &[String],
-    destination: String,
 ) -> Result<(), String> {
     let first_argument = instruction.prefix().len();
     let arguments = &command[first_argument..];
     let commands = instruction.run(arguments)?;
+
+    let destination = match std::env::var("PICO_ADDRESS") {
+        Ok(value) => value,
+        Err(_) => String::from("192.168.7.1:1234"),
+    };
 
     let destination = parse_address(destination)?;
     let socket = Socket::bind(destination.port()).await?;

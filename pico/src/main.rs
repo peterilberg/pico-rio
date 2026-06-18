@@ -1,9 +1,10 @@
 #![no_std]
 #![no_main]
 
+use core::str::FromStr;
 use defmt::*;
 use embassy_executor::{Executor, Spawner};
-use embassy_net::{IpEndpoint, Ipv4Address, Ipv4Cidr};
+use embassy_net::{IpAddress, IpEndpoint, Ipv4Address, Ipv4Cidr, StaticConfigV4};
 use embassy_rp::adc::Channel;
 use embassy_rp::gpio::{Input, Level, Output, Pull};
 use embassy_rp::multicore::{Stack, spawn_core1};
@@ -109,13 +110,7 @@ fn core0_task(
     let logging = usb_device.add_logging();
     let (ethernet, network_card) = usb_device.add_ethernet();
 
-    let [a, b, c, d] = network_settings.address.octets();
-    let configuration = embassy_net::StaticConfigV4 {
-        address: Ipv4Cidr::new(network_settings.address, 24),
-        dns_servers: Vec::new(),
-        gateway: Some(Ipv4Address::new(a, b, c, d + 1)),
-    };
-    let (network, network_stack) = network::new_network(network_card, configuration);
+    let (network, network_stack) = network::new_network(network_card, network_settings.config);
     let dhcp_server = network_stack.add_dhcp_server();
 
     spawner.spawn(unwrap!(usb::usb_task(usb_device)));
@@ -127,9 +122,7 @@ fn core0_task(
     spawner.spawn(unwrap!(network::notify_when_available(network_stack)));
 
     spawner.spawn(unwrap!(watchdog::task(watchdog, Duration::from_secs(3))));
-    spawner.spawn(unwrap!(
-        inbound::task(network_stack, network_settings.port,)
-    ));
+    spawner.spawn(unwrap!(inbound::task(network_stack, network_settings.port)));
 
     spawner.spawn(unwrap!(outbound::task(
         network_stack,
@@ -169,26 +162,51 @@ fn core1_task(
 }
 
 struct NetworkSettings {
-    address: Ipv4Address,
+    config: StaticConfigV4,
     port: u16,
     destination: IpEndpoint,
 }
 
 impl NetworkSettings {
-    fn new() -> Self {
-        let address = Ipv4Address::new(192, 168, 7, 1);
-        let port = 1234;
+    const OCTETS: [u8; 4] = [192, 168, 7, 1];
+    const PORT: u16 = 1234;
 
-        let destination_address = Ipv4Address::new(192, 168, 64, 47);
-        let destination_port = 12345;
+    fn new() -> Self {
+        let address = match option_env!("PICO_ADDRESS") {
+            Some(value) => value,
+            None => "",
+        };
+
+        let ([a, b, c, d], port) = Self::parse_address(address);
+        let config = embassy_net::StaticConfigV4 {
+            address: Ipv4Cidr::new(Ipv4Address::new(a, b, c, d), 24),
+            dns_servers: Vec::new(),
+            gateway: Some(Ipv4Address::new(a, b, c, d + 1)),
+        };
+
+        let destination =
+            IpEndpoint::new(IpAddress::Ipv4(Ipv4Address::new(192, 168, 64, 47)), 12345);
 
         NetworkSettings {
-            address,
+            config,
             port,
-            destination: IpEndpoint::new(
-                embassy_net::IpAddress::Ipv4(destination_address),
-                destination_port,
-            ),
+            destination,
         }
+    }
+
+    fn parse_address(address: &str) -> ([u8; 4], u16) {
+        let Ok(endpoint) = IpEndpoint::from_str(address) else {
+            return (Self::OCTETS, Self::PORT);
+        };
+
+        let address = match endpoint.addr {
+            IpAddress::Ipv4(address) => address,
+            IpAddress::Ipv6(address) => match address.to_ipv4_mapped() {
+                Some(address) => address,
+                None => Ipv4Address::from_octets(Self::OCTETS),
+            },
+        };
+
+        (address.octets(), endpoint.port)
     }
 }

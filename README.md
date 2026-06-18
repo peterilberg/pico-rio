@@ -17,41 +17,49 @@ Messages and commands are encoded and decoded with the `postcard` crate. The DHC
 ## Building
 
 1. Clone the repository.
-2. Cargo currently does not support packages with different target architectures in the same workspace. You have to build the packages manually.
-   a. Build the shared `messages` library:
+2. Adjust the hardcoded addresses and ports in `NetworkSettings` at the bottom of [./pico/src/main.rs](./pico/src/main.rs) to match your configuration. By default, the Pico
 
-        pushd messages
-        cargo build
-        popd
+   - listens on 192.168.7.1 and port 1234
+   - sends to 192.168.64.47 and port 12345
 
-   b. Build the `tools`:
+   You can also set the environment variable `PICO_ADDRESS` to change at build time the address and port that the Pico listens on. For example,
 
-        pushd tools
-        cargo build
-        popd
+        env PICO_ADDRESS=192.168.15.1:9000 ./build.sh
 
-   c. Build `pico-rio.uf2`:
-
-        pushd pico
-        cargo run --release
-        popd
-
-   d. Alternatively, run the build script from the project root folder to build all projects:
+3. Build the project with the included build script:
 
         ./build.sh
 
    *Note*: We build `pico-rio.uf2`, we don't install it. Edit `.cargo/config.toml` if you want to build and install it on your Pico with `probe-rs`.
 
-3. Install `build/pico-usb-ethernet.uf2` on your Pico by copying it to the Pico when the Pico is in boot mode. For example, on macOS:
+4. Alternatively, build the packages manually.
+   a. Cargo currently does not support packages with different target architectures in the same workspace. You have to build the packages individually.
+
+   b. Build the shared `messages` library:
+
+        pushd messages
+        cargo build
+        popd
+
+   c. Build the `tools`:
+
+        pushd tools
+        cargo build
+        popd
+
+   d. Build `pico-rio.uf2`:
+
+        pushd pico
+        cargo run --release
+        popd
+
+   *Note*: We build `pico-rio.uf2`, we don't install it. Edit `.cargo/config.toml` if you want to build and install it on your Pico with `probe-rs`.
+
+5. Install `build/pico-usb-ethernet.uf2` on your Pico by copying it to the Pico when the Pico is in boot mode. For example, on macOS:
 
         cp build/pico-usb-ethernet.uf2 /Volumes/RPI-RP2
 
-4. Use the tools in the [./tools/](./tools/) folder to talk to the Pico.
-
-   Adjust the hardcoded addresses and ports in `NetworkSettings` at the bottom of [./pico/src/main.rs](./pico/src/main.rs) to match your configuration. By default, the Pico
-
-   - listens on 192.168.7.1 and port 1234
-   - sends to 192.168.64.47 and port 12345
+6. Use the tools in the [./tools/](./tools/) folder to talk to the Pico.
 
 ## Tools
 
@@ -73,9 +81,13 @@ Pipe the output through grep if you want to focus on specific items.
 
 ### Instruct
 
-    cargo run --bin instruct ADDRESS:PORT COMMAND
+    cargo run --bin instruct COMMAND
 
-The `instruct` tool sends `COMMAND` to the Pico at the specified `ADDRESS` and `PORT`. Refer to the [Application](#application) section and the default [pin assignments](#core-1) for more information on how to use these commands and where to find `PIN` numbers.
+The `instruct` tool sends `COMMAND` to the Pico at the default address 192.168.7.1 and port 1234. Set the environment variable `PICO_ADDRESS` if you have changed the defaults at build time (see [step 2](#building)). For example,
+
+        env PICO_ADDRESS=192.168.15.1:9000 cargo run --bin instruct COMMAND
+
+Refer to the [Application](#application) section and the default [pin assignments](#core-1) for more information on how to use these commands and where to find `PIN` numbers.
 
 Available commands are:
 

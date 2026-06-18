@@ -8,7 +8,13 @@ use tokio::time::{self, Duration};
 pub fn parse_address(address: String) -> Result<SocketAddr, String> {
     match address.parse::<SocketAddr>() {
         Ok(address) => Ok(address),
-        Err(error) => Err(error.to_string()),
+        Err(error) => Err([
+            error.to_string(),
+            ": ".to_string(),
+            address,
+            ", expected a.b.c.d:port".to_string(),
+        ]
+        .join("")),
     }
 }
 
