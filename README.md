@@ -26,9 +26,13 @@ Messages and commands are encoded and decoded with the `postcard` crate. The DHC
 
         env PICO_ADDRESS=192.168.15.1:9000 ./build.sh
 
-3. Build the project with the included build script:
+3. Build the generic version of the project with the included build script:
 
         ./build.sh
+
+   Enable the `water_tank` feature to include example application:
+
+        ./build.sh --features water_tank
 
    *Note*: We build `pico-rio.uf2`, we don't install it. Edit `.cargo/config.toml` if you want to build and install it on your Pico with `probe-rs`.
 
@@ -47,10 +51,16 @@ Messages and commands are encoded and decoded with the `postcard` crate. The DHC
         cargo build
         popd
 
-   d. Build `pico-rio.uf2`:
+   d. Build the generic version of `pico-rio.uf2`:
 
         pushd pico
         cargo run --release
+        popd
+
+      Build the `pico-rio.uf2` including the example application:
+
+        pushd pico
+        cargo run --release --features water_tank
         popd
 
    *Note*: We build `pico-rio.uf2`, we don't install it. Edit `.cargo/config.toml` if you want to build and install it on your Pico with `probe-rs`.

@@ -46,6 +46,13 @@ pub async fn add_line(label: String<16>, value: Value) {
     INBOX.send(Message::AddLine { label, value }).await;
 }
 
+#[allow(dead_code)]
+pub async fn add_text(label: &str, value: Value) {
+    if let Ok(label) = String::try_from(label) {
+        INBOX.send(Message::AddLine { label, value }).await;
+    }
+}
+
 pub async fn refresh() {
     INBOX.send(Message::Refresh).await;
 }

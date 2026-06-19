@@ -30,7 +30,6 @@ async fn main() {
         &DisplayAnalog,
         &DisplayOffOn,
         &DisplayOnOff,
-        &ExampleWaterTank,
     ];
 
     match find_instruction(&instructions, &command) {
@@ -399,41 +398,6 @@ impl Instruction for DisplayOnOff {
             value: Value::OnOff(pin),
         }])
     }
-}
-
-struct ExampleWaterTank;
-
-impl Instruction for ExampleWaterTank {
-    fn prefix(&self) -> Strings {
-        &["example", "water", "tank"]
-    }
-
-    fn arguments(&self) -> Strings {
-        &[]
-    }
-
-    fn run(&self, _arguments: &[String]) -> Result<Vec<Command>, String> {
-        Ok(vec![
-            Command::ClearDisplay,
-            add_line("Water tank", Value::None),
-            add_line("Pump", Value::Analog(26)),
-            add_line("Fill level", Value::Analog(27)),
-            add_line("Source (NC)", Value::OffOn(20)),
-            add_line("Drain  (NO)", Value::OnOff(19)),
-            Command::BangBangInput { pin: 27 },
-            Command::BangBangOutput { pin: 6 },
-            Command::BangBangLowerLimit { value: 45 },
-            Command::BangBangUpperLimit { value: 50 },
-        ])
-    }
-}
-
-fn add_line(label: &str, value: Value) -> Command {
-    let label = match heapless::String::<16>::try_from(label) {
-        Ok(string) => string,
-        Err(_) => heapless::String::new(),
-    };
-    Command::AddLine { label, value }
 }
 
 fn get_pin(argument: &String) -> Result<u8, String> {

@@ -5,7 +5,7 @@ cargo build
 popd
 
 pushd pico
-cargo run --release
+cargo run --release $@
 popd
 
 pushd tools

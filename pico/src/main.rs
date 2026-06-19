@@ -36,6 +36,16 @@ mod timer;
 mod usb;
 mod watchdog;
 
+mod applications;
+
+cfg_if::cfg_if! {
+    if #[cfg(feature = "water_tank")] {
+    use applications::water_tank as application;
+    } else {
+    use applications::none as application;
+    }
+}
+
 bind_interrupts!(struct Irqs {
     DMA_IRQ_0 => dma::InterruptHandler<DMA_CH0>, dma::InterruptHandler<DMA_CH1>;
 });
@@ -159,6 +169,7 @@ fn core1_task(
     spawner.spawn(unwrap!(measurements::task()));
     spawner.spawn(unwrap!(display::task(display)));
     spawner.spawn(unwrap!(bang_bang::task(Duration::from_millis(1000))));
+    spawner.spawn(unwrap!(application::task()));
 }
 
 struct NetworkSettings {
