@@ -11,6 +11,7 @@ use crate::bang_bang;
 use crate::digital_out;
 use crate::display;
 use crate::network::{self, SocketBuffers};
+use crate::watchdog;
 
 #[embassy_executor::task]
 pub async fn task(stack: network::NetworkStack, port: u16) {
@@ -31,12 +32,9 @@ pub async fn task(stack: network::NetworkStack, port: u16) {
                 ping_pong(&socket, endpoint).await;
             }
             Command::Restart => {
-                todo!("not implemented yet");
+                watchdog::restart().await;
             }
             Command::Subscribe => {
-                todo!("not implemented yet");
-            }
-            Command::Unsubscribe => {
                 todo!("not implemented yet");
             }
             Command::SetDO { pin, value } => {

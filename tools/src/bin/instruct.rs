@@ -15,6 +15,7 @@ async fn main() {
 
     let instructions: [&dyn Instruction; _] = [
         &PingPong,
+        &Restart,
         &SetDigitalOut,
         &SetAnalogOut,
         &StartBangBang,
@@ -131,6 +132,22 @@ impl Instruction for PingPong {
 
     fn run(&self, _arguments: &[String]) -> Result<Vec<Command>, String> {
         Ok(vec![Command::Ping])
+    }
+}
+
+struct Restart;
+
+impl Instruction for Restart {
+    fn prefix(&self) -> Strings {
+        &["restart"]
+    }
+
+    fn arguments(&self) -> Strings {
+        &[]
+    }
+
+    fn run(&self, _arguments: &[String]) -> Result<Vec<Command>, String> {
+        Ok(vec![Command::Restart])
     }
 }
 

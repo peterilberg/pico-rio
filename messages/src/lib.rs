@@ -9,7 +9,6 @@ pub enum Command {
     Restart,
 
     Subscribe,
-    Unsubscribe,
 
     SetDO { pin: u8, value: bool },
     SetAO { pin: u8, value: u8 },

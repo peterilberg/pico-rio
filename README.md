@@ -108,6 +108,12 @@ ping
 Test the connection to the Pico.
 
 ```
+restart
+```
+
+Restart the Pico.
+
+```
 digital PIN on|off
 ```
 
