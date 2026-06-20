@@ -24,6 +24,7 @@ use {defmt_rtt as _, panic_probe as _};
 
 mod analog_in;
 mod analog_out;
+mod application;
 mod bang_bang;
 mod digital_in;
 mod digital_out;
@@ -35,16 +36,6 @@ mod outbound;
 mod timer;
 mod usb;
 mod watchdog;
-
-mod applications;
-
-cfg_if::cfg_if! {
-    if #[cfg(feature = "water_tank")] {
-    use applications::water_tank as application;
-    } else {
-    use applications::none as application;
-    }
-}
 
 bind_interrupts!(struct Irqs {
     DMA_IRQ_0 => dma::InterruptHandler<DMA_CH0>, dma::InterruptHandler<DMA_CH1>;
