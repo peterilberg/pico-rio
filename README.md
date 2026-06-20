@@ -77,7 +77,7 @@ The tools communicate with the Pico at the default address 192.168.7.1 and port 
 
 Set the environment variable `PICO_ADDRESS` if you have changed the defaults at build time (see [step 2](#building)). For example,
 
-        env PICO_ADDRESS=192.168.15.1:9000 cargo run --bin observe
+    env PICO_ADDRESS=192.168.15.1:9000 cargo run --bin observe
 
 ### Observe
 
