@@ -3,8 +3,7 @@ use embassy_rp::pwm::{Config, Pwm, SetDutyCycle};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
 use embassy_time::Duration;
-use heapless::Vec;
-use messages::{Content, NUM_PINS_AO};
+use messages::{Content, Pins};
 use {defmt_rtt as _, panic_probe as _};
 
 use crate::measurements;
@@ -35,23 +34,23 @@ pub fn configuation(frequency_hz: u32) -> Config {
 }
 
 #[embassy_executor::task]
-pub async fn task(interval: Duration, pins: [(u8, Pwm<'static>); NUM_PINS_AO]) {
+pub async fn task(interval: Duration, pins: Pins<Pwm<'static>>) {
     network::wait_for_network().await;
 
-    let mut pins: Vec<Pin, NUM_PINS_AO> = pins
-        .into_iter()
-        .map(|(pin, pwm)| Pin::new(pin, pwm))
-        .collect();
+    let mut pins: Pins<Output> = Pins::from_iter(
+        pins.into_iter()
+            .map(|(pin, pwm)| (pin, Output::new(pin, pwm))),
+    );
 
     let mut timer = Timer::new(interval);
     loop {
         match select(timer.wait(), INBOX.receive()).await {
             Either::First(()) => {
-                send_duty_cycles(&pins[..], &mut timer).await;
+                send_duty_cycles(&pins, &mut timer).await;
             }
             Either::Second(Message::Set { pin, value }) => {
-                if let Some(pin) = get_pin(pin, &mut pins[..]) {
-                    pin.set_duty_cycle(value);
+                if let Some(output) = get_output(pin, &mut pins) {
+                    output.set_duty_cycle(value);
                 }
             }
         }
@@ -60,32 +59,33 @@ pub async fn task(interval: Duration, pins: [(u8, Pwm<'static>); NUM_PINS_AO]) {
     }
 }
 
-async fn send_duty_cycles(pins: &[Pin], timer: &mut Timer) {
+async fn send_duty_cycles(pins: &Pins<Output>, timer: &mut Timer) {
     timer.start();
 
-    let mut state = [(0_u8, 0_u8); NUM_PINS_AO];
-    for (i, pin) in pins.iter().enumerate() {
-        state[i].0 = pin.pin;
-        state[i].1 = pin.duty_cycle;
+    let mut state = Pins::<u8>::new();
+    for (_, output) in pins {
+        let _ = state.push((output.pin, output.duty_cycle));
     }
 
     measurements::set_analog(&state).await;
     outbound::send(Content::AO { pins: state }, timer.stop()).await;
 }
 
-fn get_pin(pin: u8, pins: &mut [Pin]) -> Option<&mut Pin> {
-    pins.iter_mut().find(|known_pin| pin == known_pin.pin)
+fn get_output(pin: u8, pins: &mut Pins<Output>) -> Option<&mut Output> {
+    pins.iter_mut()
+        .find(|(known_pin, _)| pin == *known_pin)
+        .map(|(_, output)| output)
 }
 
-struct Pin {
+struct Output {
     pin: u8,
     duty_cycle: u8,
     pwm: Pwm<'static>,
 }
 
-impl Pin {
+impl Output {
     fn new(pin: u8, pwm: Pwm<'static>) -> Self {
-        Pin {
+        Output {
             pin,
             duty_cycle: 0,
             pwm,

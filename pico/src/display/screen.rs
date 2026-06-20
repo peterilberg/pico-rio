@@ -45,7 +45,9 @@ where
     }
 
     pub fn pop_page(&mut self) {
-        self.pages.pop();
+        if self.pages.len() > 1 {
+            self.pages.pop();
+        }
     }
 
     pub fn add_line(&mut self, label: String<16>, value: Value) {

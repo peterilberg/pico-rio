@@ -1,7 +1,17 @@
 #![no_std]
 
-use heapless::String;
+use heapless::{String, Vec};
 use serde::{Deserialize, Serialize};
+
+pub const PICO_ADDRESS_ENVNAME: &str = "PICO_ADDRESS";
+pub const PICO_ADDRESS_DEFAULT: &str = "192.168.7.1:1234";
+pub const PICO_ADDRESS_BUILD_TIME: Option<&str> = option_env!("PICO_ADDRESS");
+
+pub type Pins<T> = Vec<(u8, T), 8>;
+pub type Label = String<16>;
+
+pub const MAX_NUM_MEASUREMENTS: usize = 32;
+pub type Measurements = [u8; MAX_NUM_MEASUREMENTS];
 
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq)]
 pub enum Command {
@@ -26,7 +36,7 @@ pub enum Command {
     BangBangHide,
 
     ClearDisplay,
-    AddLine { label: String<16>, value: Value },
+    AddLine { label: Label, value: Value },
 }
 
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq)]
@@ -35,21 +45,15 @@ pub struct Info {
     pub diagnostics: Diagnostics,
 }
 
-pub const NUM_PINS: usize = 32;
-pub const NUM_PINS_DI: usize = 4;
-pub const NUM_PINS_DO: usize = 5;
-pub const NUM_PINS_AI: usize = 3;
-pub const NUM_PINS_AO: usize = 2;
-
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq)]
 pub enum Content {
     Pong,
 
-    DI { pins: [(u8, bool); NUM_PINS_DI] },
-    DO { pins: [(u8, bool); NUM_PINS_DO] },
+    DI { pins: Pins<bool> },
+    DO { pins: Pins<bool> },
 
-    AI { pins: [(u8, u8); NUM_PINS_AI] },
-    AO { pins: [(u8, u8); NUM_PINS_AO] },
+    AI { pins: Pins<u8> },
+    AO { pins: Pins<u8> },
 
     BangBang { settings: BangBang },
 }
@@ -64,8 +68,8 @@ pub enum Mode {
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Clone)]
 pub struct BangBang {
     pub mode: Mode,
-    pub input: u8,
-    pub output: u8,
+    pub input_pin: u8,
+    pub output_pin: u8,
     pub lower_limit: u8,
     pub upper_limit: u8,
 }

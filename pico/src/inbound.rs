@@ -11,6 +11,7 @@ use crate::bang_bang;
 use crate::digital_out;
 use crate::display;
 use crate::network::{self, SocketBuffers};
+use crate::outbound;
 use crate::watchdog;
 
 #[embassy_executor::task]
@@ -35,7 +36,7 @@ pub async fn task(stack: network::NetworkStack, port: u16) {
                 watchdog::restart().await;
             }
             Command::Subscribe => {
-                todo!("not implemented yet");
+                outbound::subscribe(endpoint).await;
             }
             Command::SetDO { pin, value } => {
                 digital_out::set_pin(pin, value).await;

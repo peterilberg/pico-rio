@@ -1,9 +1,16 @@
-use messages::Command;
+use messages::{Command, PICO_ADDRESS_DEFAULT, PICO_ADDRESS_ENVNAME};
 use postcard::{from_bytes, to_slice};
 use serde::Deserialize;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use tokio::net::UdpSocket;
 use tokio::time::{self, Duration};
+
+pub fn get_pico_address() -> String {
+    match std::env::var(PICO_ADDRESS_ENVNAME) {
+        Ok(value) => value,
+        Err(_) => String::from(PICO_ADDRESS_DEFAULT),
+    }
+}
 
 pub fn parse_address(address: String) -> Result<SocketAddr, String> {
     match address.parse::<SocketAddr>() {

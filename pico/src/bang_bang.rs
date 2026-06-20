@@ -75,8 +75,8 @@ pub async fn task(interval: Duration) {
 
     let mut settings = BangBang {
         mode: Mode::Off,
-        input: 0,
-        output: 0,
+        input_pin: 0,
+        output_pin: 0,
         lower_limit: 0,
         upper_limit: 0,
     };
@@ -96,15 +96,15 @@ pub async fn task(interval: Duration) {
                 update_display(&settings, visible).await;
             }
             Either::Second(Message::Stop) => {
-                analog_out::set_pin(settings.output, 0).await;
+                analog_out::set_pin(settings.output_pin, 0).await;
                 settings.mode = Mode::Off;
                 update_display(&settings, visible).await;
             }
             Either::Second(Message::SetInput { pin }) => {
-                settings.input = pin;
+                settings.input_pin = pin;
             }
             Either::Second(Message::SetOutput { pin }) => {
-                settings.output = pin;
+                settings.output_pin = pin;
             }
             Either::Second(Message::SetLowerLimit { value }) => {
                 settings.lower_limit = value;
@@ -120,13 +120,17 @@ pub async fn task(interval: Duration) {
                 measurements = new_values;
             }
             Either::Second(Message::Show) => {
-                display::add_page().await;
-                visible = true;
-                update_display(&settings, visible).await;
+                if !visible {
+                    display::add_page().await;
+                    visible = true;
+                    update_display(&settings, visible).await;
+                }
             }
             Either::Second(Message::Hide) => {
-                display::remove_page().await;
-                visible = false;
+                if visible {
+                    display::remove_page().await;
+                    visible = false;
+                }
             }
         }
 
@@ -148,19 +152,19 @@ async fn run(settings: &mut BangBang, measurements: &Measurements) {
     match settings.mode {
         Mode::Off => {}
         Mode::Running => {
-            let value = measurements[settings.input as usize];
+            let value = measurements[settings.input_pin as usize];
             if value < settings.upper_limit {
                 let value = (settings.upper_limit - value) * 2;
-                if value != measurements[settings.output as usize] {
-                    analog_out::set_pin(settings.output, value).await;
+                if value != measurements[settings.output_pin as usize] {
+                    analog_out::set_pin(settings.output_pin, value).await;
                 }
             } else {
-                analog_out::set_pin(settings.output, 0).await;
+                analog_out::set_pin(settings.output_pin, 0).await;
                 settings.mode = Mode::Waiting;
             }
         }
         Mode::Waiting => {
-            let value = measurements[settings.input as usize];
+            let value = measurements[settings.input_pin as usize];
             if value < settings.lower_limit {
                 settings.mode = Mode::Running;
             }
@@ -177,9 +181,9 @@ async fn update_display(settings: &BangBang, visible: bool) {
 
     display::clear().await;
     display::add_line(label("Controller"), Value::Boolean(enabled)).await;
-    display::add_line(label("Output"), Value::Analog(settings.output)).await;
+    display::add_line(label("Output"), Value::Analog(settings.output_pin)).await;
     display::add_line(label("Upper limit"), Value::Number(settings.upper_limit)).await;
-    display::add_line(label("Input"), Value::Analog(settings.input)).await;
+    display::add_line(label("Input"), Value::Analog(settings.input_pin)).await;
     display::add_line(label("Lower limit"), Value::Number(settings.lower_limit)).await;
     display::refresh().await;
 }

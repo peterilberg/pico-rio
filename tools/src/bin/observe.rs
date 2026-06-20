@@ -1,23 +1,29 @@
-use messages::{Content, Diagnostics, Info};
+use messages::{Command, Content, Diagnostics, Info};
 use std::env::Args;
 use std::net::SocketAddr;
 use std::time::Duration;
 
+use tools::PICO_ADDRESS_USAGE;
 use tools::logger::Logger;
-use tools::network::{Buffer, Socket};
+use tools::network::{Buffer, Socket, get_pico_address, parse_address};
 
 #[tokio::main]
 async fn main() {
     let arguments = std::env::args();
-    let Config { port } = Config::build(arguments).unwrap_or_else(|error| {
+    let Config { destination } = Config::build(arguments).unwrap_or_else(|error| {
         eprintln!("error: {}", error);
         std::process::exit(1);
     });
 
-    let server = Socket::bind(port).await.unwrap_or_else(|error| {
+    let server = Socket::bind(0).await.unwrap_or_else(|error| {
         eprintln!("error: {}", error);
         std::process::exit(1);
     });
+
+    let command = Command::Subscribe;
+    let mut buffer = Buffer::new();
+    buffer.encode(&command).unwrap();
+    server.send(destination, &buffer).await.unwrap();
 
     let mut buffer = Buffer::new();
     loop {
@@ -40,35 +46,26 @@ async fn main() {
 }
 
 struct Config {
-    port: u16,
+    destination: SocketAddr,
 }
 
 impl Config {
     fn build(mut arguments: Args) -> Result<Self, String> {
         arguments.next(); // ignore executable name
 
-        let port = match arguments.next() {
-            Some(arg) => arg,
-            None => {
-                let message = String::from("missing port number");
-                return Self::error(message);
-            }
+        if arguments.len() > 0 {
+            return Self::error("command does not expect arguments".to_string());
         };
 
-        let port = match port.parse::<u16>() {
-            Ok(port) => port,
-            Err(error) => {
-                let message = format!("invalid port number {}: {}", port, error);
-                return Self::error(message);
-            }
-        };
-
-        Ok(Config { port })
+        match parse_address(get_pico_address()) {
+            Ok(destination) => Ok(Config { destination }),
+            Err(error) => Self::error(error.to_string()),
+        }
     }
 
     fn error(message: String) -> Result<Self, String> {
-        let usage = String::from("usage: local-port");
-        Err([message, usage].join("\n"))
+        let address = String::from(PICO_ADDRESS_USAGE);
+        Err([message, address].join("\n"))
     }
 }
 

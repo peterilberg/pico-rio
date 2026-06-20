@@ -1,10 +1,11 @@
+use heapless;
 use messages::{Command, Info, Value};
 use std::env::Args;
 use std::time::Duration;
 
-use heapless;
+use tools::PICO_ADDRESS_USAGE;
 use tools::instruction::{Instruction, Match, Strings, find_instruction};
-use tools::network::{Buffer, Socket, parse_address};
+use tools::network::{Buffer, Socket, get_pico_address, parse_address};
 
 #[tokio::main]
 async fn main() {
@@ -67,13 +68,11 @@ impl Config {
 
     fn error(message: String) -> Result<Self, String> {
         const USAGE: &str = "usage: COMMAND
-Use command 'help' to show available commands.
-
-Set environment variable PICO_ADDRESS to the address and port
-of your pico. By default: PICO_ADDRESS=192.168.7.1:1234";
+Use command 'help' to show available commands.";
 
         let usage = String::from(USAGE);
-        Err([message, usage].join("\n"))
+        let address = String::from(PICO_ADDRESS_USAGE);
+        Err([message, usage, address].join("\n"))
     }
 }
 
@@ -96,13 +95,8 @@ async fn process_instruction(
     let arguments = &command[first_argument..];
     let commands = instruction.run(arguments)?;
 
-    let destination = match std::env::var("PICO_ADDRESS") {
-        Ok(value) => value,
-        Err(_) => String::from("192.168.7.1:1234"),
-    };
-
-    let destination = parse_address(destination)?;
-    let socket = Socket::bind(destination.port()).await?;
+    let destination = parse_address(get_pico_address())?;
+    let socket = Socket::bind(0).await?;
 
     for command in commands {
         let mut buffer = Buffer::new();

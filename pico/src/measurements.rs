@@ -1,15 +1,16 @@
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
-use messages::NUM_PINS;
 use {defmt_rtt as _, panic_probe as _};
+
+use messages::MAX_NUM_MEASUREMENTS;
 
 use crate::bang_bang;
 use crate::display;
 use crate::network;
 
-type Message = [Option<u8>; NUM_PINS];
+pub type Measurements = messages::Measurements;
 
-pub type Measurements = [u8; NUM_PINS];
+type Message = heapless::Vec<(u8, u8), MAX_NUM_MEASUREMENTS>;
 
 static INBOX: Channel<CriticalSectionRawMutex, Message, 16> = Channel::new();
 
@@ -31,11 +32,10 @@ pub async fn task() {
         let updates = INBOX.receive().await;
 
         let mut recorded_new_measurement = false;
-        for (i, update) in updates.into_iter().enumerate() {
-            if let Some(value) = update
-                && value != measurements[i]
-            {
-                measurements[i] = value;
+        for (i, measurement) in updates.into_iter() {
+            let i = i as usize;
+            if measurement != measurements[i] {
+                measurements[i] = measurement;
                 recorded_new_measurement = true;
             }
         }
@@ -48,13 +48,10 @@ pub async fn task() {
 }
 
 async fn send<T>(pins: &[(u8, T)], f: impl Fn(&T) -> u8) {
-    let mut measurements = [None; NUM_PINS];
-    for (pin, value) in pins.iter() {
-        let pin = *pin as usize;
-        if pin >= NUM_PINS {
-            continue;
-        }
-        measurements[pin] = Some(f(value));
-    }
+    let measurements = Message::from_iter(
+        pins.iter()
+            .filter(|(pin, _)| (*pin as usize) < MAX_NUM_MEASUREMENTS)
+            .map(|(pin, value)| (*pin, f(value))),
+    );
     INBOX.send(measurements).await;
 }

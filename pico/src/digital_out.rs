@@ -3,7 +3,7 @@ use embassy_rp::gpio::{Level, Output};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
 use embassy_time::Duration;
-use messages::{Content, NUM_PINS_DO};
+use messages::{Content, Pins};
 use {defmt_rtt as _, panic_probe as _};
 
 use crate::measurements;
@@ -23,7 +23,7 @@ pub async fn set_pin(pin: u8, value: bool) {
 }
 
 #[embassy_executor::task]
-pub async fn task(interval: Duration, pins: [(u8, Output<'static>); NUM_PINS_DO]) {
+pub async fn task(interval: Duration, pins: Pins<Output<'static>>) {
     network::wait_for_network().await;
 
     let mut pins = pins;
@@ -47,13 +47,15 @@ pub async fn task(interval: Duration, pins: [(u8, Output<'static>); NUM_PINS_DO]
 async fn send_pin_levels(pins: &[(u8, Output<'static>)], timer: &mut Timer) {
     timer.start();
 
-    let mut state = [(0_u8, false); NUM_PINS_DO];
-    for (i, (pin, output)) in pins.iter().enumerate() {
-        state[i].0 = *pin;
-        state[i].1 = match output.get_output_level() {
-            Level::Low => false,
-            Level::High => true,
-        };
+    let mut state = Pins::<bool>::new();
+    for (pin, output) in pins {
+        let _ = state.push((
+            *pin,
+            match output.get_output_level() {
+                Level::Low => false,
+                Level::High => true,
+            },
+        ));
     }
 
     measurements::set_digital(&state).await;

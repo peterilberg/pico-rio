@@ -1,5 +1,4 @@
-use messages::{BangBang, Diagnostics, Mode};
-use messages::{NUM_PINS_AI, NUM_PINS_AO, NUM_PINS_DI, NUM_PINS_DO};
+use messages::{BangBang, Diagnostics, Mode, Pins};
 use std::net::{IpAddr, SocketAddr};
 use std::time::Duration;
 
@@ -39,7 +38,7 @@ impl<'task> Logger<'task> {
         );
     }
 
-    pub fn digital_in(&self, pins: [(u8, bool); NUM_PINS_DI], diagnostics: Diagnostics) {
+    pub fn digital_in(&self, pins: Pins<bool>, diagnostics: Diagnostics) {
         self.diagnostics(diagnostics);
         for (pin, level) in pins {
             self.prefix();
@@ -47,7 +46,7 @@ impl<'task> Logger<'task> {
         }
     }
 
-    pub fn digital_out(&self, pins: [(u8, bool); NUM_PINS_DO], diagnostics: Diagnostics) {
+    pub fn digital_out(&self, pins: Pins<bool>, diagnostics: Diagnostics) {
         self.diagnostics(diagnostics);
         for (pin, level) in pins {
             self.prefix();
@@ -55,7 +54,7 @@ impl<'task> Logger<'task> {
         }
     }
 
-    pub fn analog_in(&self, pins: [(u8, u8); NUM_PINS_AI], diagnostics: Diagnostics) {
+    pub fn analog_in(&self, pins: Pins<u8>, diagnostics: Diagnostics) {
         self.diagnostics(diagnostics);
         for (pin, value) in pins {
             self.prefix();
@@ -63,7 +62,7 @@ impl<'task> Logger<'task> {
         }
     }
 
-    pub fn analog_out(&self, pins: [(u8, u8); NUM_PINS_AO], diagnostics: Diagnostics) {
+    pub fn analog_out(&self, pins: Pins<u8>, diagnostics: Diagnostics) {
         self.diagnostics(diagnostics);
         for (pin, value) in pins {
             self.prefix();
@@ -76,9 +75,9 @@ impl<'task> Logger<'task> {
         self.prefix();
         println!("mode:        {}", get_mode(settings.mode));
         self.prefix();
-        println!("input pin:   {}", settings.input);
+        println!("input pin:   {}", settings.input_pin);
         self.prefix();
-        println!("output pin:  {}", settings.output);
+        println!("output pin:  {}", settings.output_pin);
         self.prefix();
         println!("lower limit: {}", settings.lower_limit);
         self.prefix();

@@ -73,11 +73,17 @@ Messages and commands are encoded and decoded with the `postcard` crate. The DHC
 
 ## Tools
 
+The tools communicate with the Pico at the default address 192.168.7.1 and port 1234.
+
+Set the environment variable `PICO_ADDRESS` if you have changed the defaults at build time (see [step 2](#building)). For example,
+
+        env PICO_ADDRESS=192.168.15.1:9000 cargo run --bin observe
+
 ### Observe
 
-    cargo run --bin observe PORT
+    cargo run --bin observe
 
-The `observe` tool listens for messages from the Pico on the specified `PORT`. The tool prints status information for the running tasks and measurements. For example:
+The `observe` tool listens for messages from the Pico. The tool prints status information for the running tasks and measurements. For example:
 
 ```
 192.168.7.1: digital in at 6.005357s (+ 0ns) with period 1s took 64µs
@@ -93,11 +99,7 @@ Pipe the output through grep if you want to focus on specific items.
 
     cargo run --bin instruct COMMAND
 
-The `instruct` tool sends `COMMAND` to the Pico at the default address 192.168.7.1 and port 1234. Set the environment variable `PICO_ADDRESS` if you have changed the defaults at build time (see [step 2](#building)). For example,
-
-        env PICO_ADDRESS=192.168.15.1:9000 cargo run --bin instruct COMMAND
-
-Refer to the [Application](#application) section and the default [pin assignments](#core-1) for more information on how to use these commands and where to find `PIN` numbers.
+The `instruct` tool sends `COMMAND` to the Pico. Refer to the [Application](#application) section and the default [pin assignments](#core-1) for more information on how to use these commands and where to find `PIN` numbers.
 
 Available commands are:
 

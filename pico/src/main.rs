@@ -18,7 +18,7 @@ use embassy_rp::{
 use embassy_rp::{bind_interrupts, dma};
 use embassy_time::Duration;
 use heapless::Vec;
-use messages::{NUM_PINS_AI, NUM_PINS_AO, NUM_PINS_DI, NUM_PINS_DO};
+use messages::{PICO_ADDRESS_BUILD_TIME, PICO_ADDRESS_DEFAULT, Pins};
 use static_cell::StaticCell;
 use {defmt_rtt as _, panic_probe as _};
 
@@ -54,32 +54,32 @@ bind_interrupts!(struct Irqs {
 fn main() -> ! {
     let p = embassy_rp::init(Default::default());
 
-    let pins_di = [
+    let pins_di = Pins::from_array([
         (18, Input::new(p.PIN_18, Pull::None)),
         (19, Input::new(p.PIN_19, Pull::None)),
         (20, Input::new(p.PIN_20, Pull::None)),
         (21, Input::new(p.PIN_21, Pull::None)),
-    ];
+    ]);
 
-    let pins_do = [
+    let pins_do = Pins::from_array([
         (10, Output::new(p.PIN_10, Level::Low)),
         (11, Output::new(p.PIN_11, Level::Low)),
         (12, Output::new(p.PIN_12, Level::Low)),
         (13, Output::new(p.PIN_13, Level::Low)),
         (25, Output::new(p.PIN_25, Level::Low)),
-    ];
+    ]);
 
-    let pins_ai = [
+    let pins_ai = Pins::from_array([
         (26, Channel::new_pin(p.PIN_26, Pull::None)),
         (27, Channel::new_pin(p.PIN_27, Pull::None)),
         (28, Channel::new_pin(p.PIN_28, Pull::None)),
-    ];
+    ]);
 
     let pwm = analog_out::configuation(100);
-    let pins_ao = [
+    let pins_ao = Pins::from_array([
         (6, Pwm::new_output_a(p.PWM_SLICE3, p.PIN_6, pwm.clone())),
         (8, Pwm::new_output_a(p.PWM_SLICE4, p.PIN_8, pwm.clone())),
-    ];
+    ]);
 
     let spi0 = Spi::new_txonly(p.SPI0, p.PIN_2, p.PIN_3, p.DMA_CH0, Irqs, Config::default());
     let display = display::Config {
@@ -134,19 +134,16 @@ fn core0_task(
     spawner.spawn(unwrap!(watchdog::task(watchdog, Duration::from_secs(3))));
     spawner.spawn(unwrap!(inbound::task(network_stack, network_settings.port)));
 
-    spawner.spawn(unwrap!(outbound::task(
-        network_stack,
-        network_settings.destination,
-    )));
+    spawner.spawn(unwrap!(outbound::task(network_stack)));
 }
 
 fn core1_task(
     spawner: Spawner,
     adc: Peri<'static, ADC>,
-    pins_di: [(u8, Input<'static>); NUM_PINS_DI],
-    pins_do: [(u8, Output<'static>); NUM_PINS_DO],
-    pins_ai: [(u8, Channel<'static>); NUM_PINS_AI],
-    pins_ao: [(u8, Pwm<'static>); NUM_PINS_AO],
+    pins_di: Pins<Input<'static>>,
+    pins_do: Pins<Output<'static>>,
+    pins_ai: Pins<Channel<'static>>,
+    pins_ao: Pins<Pwm<'static>>,
     display: display::Config,
 ) {
     spawner.spawn(unwrap!(digital_in::task(
@@ -175,17 +172,13 @@ fn core1_task(
 struct NetworkSettings {
     config: StaticConfigV4,
     port: u16,
-    destination: IpEndpoint,
 }
 
 impl NetworkSettings {
-    const OCTETS: [u8; 4] = [192, 168, 7, 1];
-    const PORT: u16 = 1234;
-
     fn new() -> Self {
-        let address = match option_env!("PICO_ADDRESS") {
+        let address = match PICO_ADDRESS_BUILD_TIME {
             Some(value) => value,
-            None => "",
+            None => PICO_ADDRESS_DEFAULT,
         };
 
         let ([a, b, c, d], port) = Self::parse_address(address);
@@ -194,28 +187,16 @@ impl NetworkSettings {
             dns_servers: Vec::new(),
             gateway: Some(Ipv4Address::new(a, b, c, d + 1)),
         };
-
-        let destination =
-            IpEndpoint::new(IpAddress::Ipv4(Ipv4Address::new(192, 168, 64, 47)), 12345);
-
-        NetworkSettings {
-            config,
-            port,
-            destination,
-        }
+        NetworkSettings { config, port }
     }
 
     fn parse_address(address: &str) -> ([u8; 4], u16) {
         let Ok(endpoint) = IpEndpoint::from_str(address) else {
-            return (Self::OCTETS, Self::PORT);
+            return Default::default();
         };
 
-        let address = match endpoint.addr {
-            IpAddress::Ipv4(address) => address,
-            IpAddress::Ipv6(address) => match address.to_ipv4_mapped() {
-                Some(address) => address,
-                None => Ipv4Address::from_octets(Self::OCTETS),
-            },
+        let IpAddress::Ipv4(address) = endpoint.addr else {
+            return Default::default();
         };
 
         (address.octets(), endpoint.port)
