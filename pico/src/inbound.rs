@@ -6,13 +6,9 @@ use postcard::{from_bytes, to_slice};
 use static_cell::StaticCell;
 use {defmt_rtt as _, panic_probe as _};
 
-use crate::analog_out;
-use crate::bang_bang;
-use crate::digital_out;
-use crate::display;
+use crate::dispatcher;
 use crate::network::{self, SocketBuffers};
 use crate::outbound;
-use crate::watchdog;
 
 #[embassy_executor::task]
 pub async fn task(stack: network::NetworkStack, port: u16) {
@@ -24,56 +20,11 @@ pub async fn task(stack: network::NetworkStack, port: u16) {
     log::info!("inbound: endpoint {:?}", socket.endpoint());
 
     loop {
-        let Some((endpoint, command)) = wait_for_command(&socket).await else {
-            continue;
-        };
-
-        match command {
-            Command::Ping => {
-                ping_pong(&socket, endpoint).await;
-            }
-            Command::Restart => {
-                watchdog::restart().await;
-            }
-            Command::Subscribe => {
-                outbound::subscribe(endpoint).await;
-            }
-            Command::SetDO { pin, value } => {
-                digital_out::set_pin(pin, value).await;
-            }
-            Command::SetAO { pin, value } => {
-                analog_out::set_pin(pin, value).await;
-            }
-            Command::BangBangStart => {
-                bang_bang::start().await;
-            }
-            Command::BangBangStop => {
-                bang_bang::stop().await;
-            }
-            Command::BangBangInput { pin } => {
-                bang_bang::set_input(pin).await;
-            }
-            Command::BangBangOutput { pin } => {
-                bang_bang::set_output(pin).await;
-            }
-            Command::BangBangLowerLimit { value } => {
-                bang_bang::set_lower_limit(value).await;
-            }
-            Command::BangBangUpperLimit { value } => {
-                bang_bang::set_upper_limit(value).await;
-            }
-            Command::BangBangShow => {
-                bang_bang::show().await;
-            }
-            Command::BangBangHide => {
-                bang_bang::hide().await;
-            }
-            Command::ClearDisplay => {
-                display::clear().await;
-            }
-            Command::AddLine { label, value } => {
-                display::add_line(label, value).await;
-            }
+        match wait_for_command(&socket).await {
+            None => continue,
+            Some((endpoint, Command::Ping)) => ping_pong(&socket, endpoint).await,
+            Some((endpoint, Command::Subscribe)) => outbound::subscribe(endpoint).await,
+            Some((_endpoint, command)) => dispatcher::dispatch(command).await,
         }
     }
 }

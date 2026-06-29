@@ -28,11 +28,13 @@ mod application;
 mod bang_bang;
 mod digital_in;
 mod digital_out;
+mod dispatcher;
 mod display;
 mod inbound;
 mod measurements;
 mod network;
 mod outbound;
+mod sequencer;
 mod timer;
 mod usb;
 mod watchdog;
@@ -137,6 +139,7 @@ fn core1_task(
     pins_ao: Pins<Pwm<'static>>,
     display: display::Config,
 ) {
+    spawner.spawn(unwrap!(dispatcher::task()));
     spawner.spawn(unwrap!(digital_in::task(
         Duration::from_millis(1000),
         pins_di,
@@ -157,6 +160,7 @@ fn core1_task(
     spawner.spawn(unwrap!(measurements::task()));
     spawner.spawn(unwrap!(display::task(display)));
     spawner.spawn(unwrap!(bang_bang::task(Duration::from_millis(1000))));
+    spawner.spawn(unwrap!(sequencer::task(&application::SEQUENCES[..])));
     spawner.spawn(unwrap!(application::task()));
 }
 

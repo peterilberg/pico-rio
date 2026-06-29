@@ -13,7 +13,7 @@ pub type Label = String<16>;
 pub const MAX_NUM_MEASUREMENTS: usize = 32;
 pub type Measurements = [u8; MAX_NUM_MEASUREMENTS];
 
-#[derive(Serialize, Deserialize, Debug, Eq, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, Eq, PartialEq)]
 pub enum Command {
     Ping,
     Restart,
@@ -35,8 +35,13 @@ pub enum Command {
     BangBangShow,
     BangBangHide,
 
+    AddPage,
+    RemovePage,
     ClearDisplay,
     AddLine { label: Label, value: Value },
+
+    StartSequence { sequence_id: u8 },
+    StopSequence,
 }
 
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq)]
@@ -74,7 +79,7 @@ pub struct BangBang {
     pub upper_limit: u8,
 }
 
-#[derive(Serialize, Deserialize, PartialEq, Eq, Debug)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 pub enum Value {
     None,
     OffOn(u8),
@@ -85,6 +90,7 @@ pub enum Value {
 }
 
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq)]
+// TODO use instant and duration directly?
 pub struct Diagnostics {
     pub timestamp_us: u64,
     pub execution_us: u64,

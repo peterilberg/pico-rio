@@ -32,6 +32,8 @@ async fn main() {
         &DisplayAnalog,
         &DisplayOffOn,
         &DisplayOnOff,
+        &StartSequence,
+        &StopSequence,
     ];
 
     match find_instruction(&instructions, &command) {
@@ -408,6 +410,39 @@ impl Instruction for DisplayOnOff {
             label,
             value: Value::OnOff(pin),
         }])
+    }
+}
+
+struct StartSequence;
+
+impl Instruction for StartSequence {
+    fn prefix(&self) -> Strings {
+        &["sequence", "start"]
+    }
+
+    fn arguments(&self) -> Strings {
+        &["ID"]
+    }
+
+    fn run(&self, arguments: &[String]) -> Result<Vec<Command>, String> {
+        let sequence_id = get_number(&arguments[0])?;
+        Ok(vec![Command::StartSequence { sequence_id }])
+    }
+}
+
+struct StopSequence;
+
+impl Instruction for StopSequence {
+    fn prefix(&self) -> Strings {
+        &["sequence", "stop"]
+    }
+
+    fn arguments(&self) -> Strings {
+        &[]
+    }
+
+    fn run(&self, _arguments: &[String]) -> Result<Vec<Command>, String> {
+        Ok(vec![Command::StopSequence])
     }
 }
 

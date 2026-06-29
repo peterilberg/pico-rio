@@ -2,7 +2,6 @@ use embassy_futures::select::{Either, select};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
 use embassy_time::Duration;
-use heapless::String;
 use messages::{BangBang, Content, Diagnostics, Mode, Value};
 use {defmt_rtt as _, panic_probe as _};
 
@@ -180,17 +179,10 @@ async fn update_display(settings: &BangBang, visible: bool) {
     let enabled = settings.mode != Mode::Off;
 
     display::clear().await;
-    display::add_line(label("Controller"), Value::Boolean(enabled)).await;
-    display::add_line(label("Output"), Value::Analog(settings.output_pin)).await;
-    display::add_line(label("Upper limit"), Value::Number(settings.upper_limit)).await;
-    display::add_line(label("Input"), Value::Analog(settings.input_pin)).await;
-    display::add_line(label("Lower limit"), Value::Number(settings.lower_limit)).await;
+    display::add_text("Controller", Value::Boolean(enabled)).await;
+    display::add_text("Output", Value::Analog(settings.output_pin)).await;
+    display::add_text("Upper limit", Value::Number(settings.upper_limit)).await;
+    display::add_text("Input", Value::Analog(settings.input_pin)).await;
+    display::add_text("Lower limit", Value::Number(settings.lower_limit)).await;
     display::refresh().await;
-}
-
-fn label(label: &str) -> String<16> {
-    match String::try_from(label) {
-        Ok(string) => string,
-        Err(_) => String::new(),
-    }
 }

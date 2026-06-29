@@ -22,6 +22,7 @@ async fn main() {
 
     let command = Command::Subscribe;
     let mut buffer = Buffer::new();
+    // TODO don't blindly unwrap
     buffer.encode(&command).unwrap();
     server.send(destination, &buffer).await.unwrap();
 

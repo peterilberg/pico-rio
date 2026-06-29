@@ -7,6 +7,7 @@ use messages::MAX_NUM_MEASUREMENTS;
 use crate::bang_bang;
 use crate::display;
 use crate::network;
+use crate::sequencer;
 
 pub type Measurements = messages::Measurements;
 
@@ -43,6 +44,7 @@ pub async fn task() {
         if recorded_new_measurement {
             display::notify(&measurements).await;
             bang_bang::notify(&measurements).await;
+            sequencer::notify(&measurements).await;
         }
     }
 }

@@ -19,7 +19,7 @@ struct Page {
 }
 
 pub struct Screen<SPI, DC, SIZE: DisplaySizeAsync> {
-    pages: Vec<Page, 3>,
+    pages: Vec<Page, 4>,
     device: Device<SPI, DC, SIZE>,
 }
 
